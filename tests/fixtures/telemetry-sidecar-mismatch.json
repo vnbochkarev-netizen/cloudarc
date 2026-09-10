@@ -1,0 +1,11 @@
+{
+ "telemetry": {
+  "range_requests": 0,
+  "range_bytes": 0,
+  "sidecar_reads": 1,
+  "sidecar_bytes": 512,
+  "peak_rss_bytes": 268435456,
+  "rss_source": "ru_maxrss",
+  "data_section_read": false
+ }
+}
