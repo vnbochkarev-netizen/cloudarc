@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -327,6 +329,174 @@ def check_telemetry(args: argparse.Namespace) -> int:
     return 0
 
 
+def _probe_zstandard() -> tuple[bool, str]:
+    try:
+        import zstandard  # type: ignore
+
+        return True, str(getattr(zstandard, "__version__", "unknown"))
+    except Exception:
+        return False, "not installed"
+
+
+def _probe_proc_status() -> tuple[bool, str]:
+    try:
+        text = Path(f"/proc/{os.getpid()}/status").read_text(encoding="ascii")
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never crash
+        return False, f"unreadable ({type(exc).__name__})"
+    if "VmRSS" in text:
+        return True, "VmRSS present (linux-proc-status)"
+    return False, "no VmRSS line"
+
+
+def _package_version(repo: Path) -> str:
+    try:
+        import tomllib
+
+        data = tomllib.loads((repo / "pyproject.toml").read_text(encoding="utf-8"))
+        version = (data.get("project") or {}).get("version")
+        if isinstance(version, str) and version:
+            return version
+    except Exception:
+        pass
+    try:
+        return (repo / "skills" / "cloudarc-bounded-memory-benchmark"
+                / "VERSION").read_text(encoding="utf-8").strip()
+    except Exception:
+        return "unknown"
+
+
+def _probe_repo(repo: Path) -> list[tuple[str, bool]]:
+    return [
+        ("core/packer.py", (repo / "core" / "packer.py").is_file()),
+        ("benchmarks/large_package.py", (repo / "benchmarks" / "large_package.py").is_file()),
+        ("tests/", (repo / "tests").is_dir()),
+    ]
+
+
+def _doctor_lines(repo: Path, python: str) -> tuple[list[str], bool]:
+    has_zstd, zstd_version = _probe_zstandard()
+    proc_ok, proc_note = _probe_proc_status()
+    checks = _probe_repo(repo)
+    ready = all(ok for _, ok in checks)
+    lines = [
+        "CloudArc doctor",
+        f"  python          {sys.version.split()[0]} ({python})",
+        f"  repository      {repo} (package {_package_version(repo)})",
+        f"  zstandard       {zstd_version}"
+        + ("  -> text payloads use zstd" if has_zstd else "  -> text payloads use deflate"),
+        f"  /proc VmRSS     {proc_note}",
+    ]
+    for name, ok in checks:
+        lines.append(f"  {'ok ' if ok else 'NO '} {name}")
+    if ready:
+        lines.append("  verdict         READY - smoke, selfcheck and manual can run")
+    else:
+        lines.append("  verdict         NOT READY - benchmark modules are missing")
+        lines.append("                  clone the CloudArc repository and pass --repo <path>")
+    return lines, ready
+
+
+def run_doctor(args: argparse.Namespace) -> int:
+    repo = _repo_path(args.repo)
+    lines, ready = _doctor_lines(repo, _python_executable(args.python))
+    print("\n".join(lines))
+    return 0 if ready else 1
+
+
+def render_slo_badge(payload: dict) -> str:
+    """Render a flat shields-style SVG from one benchmark result object."""
+
+    slo = payload.get("slo") or {}
+    runs = payload.get("runs") or []
+    first = runs[0] if runs and isinstance(runs[0], dict) else {}
+    peak = 0
+    for op in ("pack", "unpack"):
+        section = first.get(op) or {}
+        peak = max(peak, int(section.get("peak_rss_bytes") or 0))
+    if not peak:
+        peak = int(first.get("peak_rss_bytes") or 0)
+    limit = int(slo.get("peak_rss_bytes_max") or 0)
+    passed = bool((payload.get("evaluation") or {}).get("pass"))
+    if not runs:
+        state, colour = "no data", "#5f6368"
+    elif passed:
+        state, colour = "PASS", "#2f7d32"
+    else:
+        state, colour = "FAIL", "#b3261e"
+    mib = 1024 * 1024
+    value = f"{state}"
+    if peak and limit:
+        value = f"{state} · {peak / mib:.1f} / {limit / mib:.0f} MiB"
+    elif peak:
+        value = f"{state} · {peak / mib:.1f} MiB"
+    label, value_text = "CloudArc SLO", value
+    char = 6.6
+    label_w = int(len(label) * char) + 16
+    value_w = int(len(value_text) * char) + 16
+    total = label_w + value_w
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{total}" height="20" '
+        f'role="img" aria-label="{label}: {value_text}">'
+        f'<rect width="{label_w}" height="20" fill="#3c4043"/>'
+        f'<rect x="{label_w}" width="{value_w}" height="20" fill="{colour}"/>'
+        f'<g fill="#fff" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" '
+        f'font-size="11">'
+        f'<text x="{label_w / 2:.0f}" y="14" text-anchor="middle">{label}</text>'
+        f'<text x="{label_w + value_w / 2:.0f}" y="14" text-anchor="middle">'
+        f"{value_text}</text></g></svg>\n"
+    )
+
+
+def run_badge(args: argparse.Namespace) -> int:
+    payload = _load_result(Path(args.input))
+    svg = render_slo_badge(payload)
+    if args.output == "-":
+        sys.stdout.write(svg)
+        return 0
+    target = Path(args.output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(svg, encoding="utf-8")
+    print(f"badge written: {target}")
+    return 0
+
+
+def run_selfcheck(args: argparse.Namespace) -> int:
+    """One-command 'hello world': tiny pack/unpack run with real RSS numbers."""
+
+    repo = _repo_path(args.repo)
+    python = _python_executable(args.python)
+    lines, ready = _doctor_lines(repo, python)
+    if not ready:
+        print("\n".join(lines), file=sys.stderr)
+        print("error: selfcheck needs the CloudArc repository (see doctor above)", file=sys.stderr)
+        return 2
+    with tempfile.TemporaryDirectory() as temp:
+        json_path = Path(temp) / "selfcheck.json"
+        md_path = Path(temp) / "selfcheck.md"
+        rc = _run(
+            [python, "-B", "-m", "benchmarks.large_package",
+             "--sizes-mib", str(args.size_mib),
+             "--json-output", str(json_path),
+             "--markdown-output", str(md_path),
+             "--fail-on-slo"],
+            cwd=repo,
+        )
+        payload = _load_result(json_path) if json_path.exists() else {}
+    first = ((payload.get("runs") or [{}])[0])
+    mib = 1024 * 1024
+    print("")
+    print(f"selfcheck: {args.size_mib} MiB pack/unpack with the CloudArc reference backend")
+    for op in ("pack", "unpack"):
+        section = first.get(op) or {}
+        peak = int(section.get("peak_rss_bytes") or 0)
+        wall = float(section.get("wall_seconds") or 0)
+        print(f"  {op:<7} {wall:6.2f} s   peak RSS {peak / mib:6.1f} MiB")
+    passed = bool((payload.get("evaluation") or {}).get("pass"))
+    limit = int((payload.get("slo") or {}).get("peak_rss_bytes_max") or 0)
+    print(f"  SLO     {'PASS' if passed else 'FAIL'} (limit {limit / mib:.0f} MiB)")
+    return 0 if (rc == 0 and passed) else 1
+
+
 def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--repo",
@@ -414,6 +584,29 @@ def build_parser() -> argparse.ArgumentParser:
         default="any",
     )
     telemetry.set_defaults(handler=check_telemetry)
+    doctor = subparsers.add_parser(
+        "doctor",
+        help="report the environment and whether the CloudArc repository is usable",
+    )
+    _add_common(doctor)
+    doctor.set_defaults(handler=run_doctor)
+
+    selfcheck = subparsers.add_parser(
+        "selfcheck",
+        help="run a tiny pack/unpack and print real RSS numbers (needs the repository)",
+    )
+    _add_common(selfcheck)
+    selfcheck.add_argument("--size-mib", type=int, default=2)
+    selfcheck.set_defaults(handler=run_selfcheck)
+
+    badge = subparsers.add_parser(
+        "badge",
+        help="render a flat SVG SLO badge from a benchmark JSON artifact",
+    )
+    badge.add_argument("--input", required=True)
+    badge.add_argument("--output", default="-", help="'-' writes the SVG to stdout")
+    badge.set_defaults(handler=run_badge)
+
     return parser
 
 

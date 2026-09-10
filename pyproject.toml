@@ -4,10 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibo-cloudarc"
-version = "1.1.0"
+version = "1.2.0"
 description = "Safe CloudArc CLI with a portable VIBO container reference backend"
 requires-python = ">=3.11"
 dependencies = []
+
+[project.optional-dependencies]
+# Optional accelerators. The reference backend works without them.
+zstd = ["zstandard>=0.22"]
+semantic = ["fastembed>=0.5", "usearch>=2.15"]
 
 [project.scripts]
 cloudarc = "cloudarc:main"

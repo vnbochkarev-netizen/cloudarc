@@ -1,5 +1,8 @@
 # Vibo CloudArc MVP
 
+![CloudArc SLO](docs/cloudarc-slo-badge.svg)
+
+
 CloudArc is a safety-first CLI around a CloudArc-specific `.vibo` container.
 The repository includes a portable reference backend so local packing,
 versioned manifest/index generation, round-trip restore, and remote-search
