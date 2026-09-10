@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import subprocess
@@ -331,9 +332,10 @@ def check_telemetry(args: argparse.Namespace) -> int:
 
 def _probe_zstandard() -> tuple[bool, str]:
     try:
-        import zstandard  # type: ignore
-
-        return True, str(getattr(zstandard, "__version__", "unknown"))
+        # Optional dependency: resolve it lazily so the skill never hard-imports
+        # a package it does not ship.
+        module = importlib.import_module("zstandard")
+        return True, str(getattr(module, "__version__", "unknown"))
     except Exception:
         return False, "not installed"
 
