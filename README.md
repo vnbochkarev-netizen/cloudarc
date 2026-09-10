@@ -2,6 +2,8 @@
 
 ![CloudArc SLO](docs/cloudarc-slo-badge.svg)
 
+![Peak RSS vs payload size](docs/cloudarc-rss-vs-size.png)
+
 
 CloudArc is a safety-first CLI around a CloudArc-specific `.vibo` container.
 The repository includes a portable reference backend so local packing,
@@ -99,3 +101,54 @@ tests/                      standard-library unit/integration tests
 The format contract is in `docs/VIBO_CONTRACT.md`. The remote search protocol
 is in `docs/REMOTE_SEARCH_PROTOCOL.md`. The selected architecture, defect-first
 hardening and P0 decisions are in `docs/ARCHITECTURE.md`.
+
+## Benchmark helper
+
+`skills/cloudarc-bounded-memory-benchmark/scripts/cloudarc_benchmark.py` drives
+the same profiles with environment checks and a badge renderer:
+
+```powershell
+# environment + repository readiness (no checkout required)
+python -B skills\cloudarc-bounded-memory-benchmark\scripts\cloudarc_benchmark.py doctor
+# smallest proof: 2 MiB pack/unpack with real RSS numbers
+python -B skills\cloudarc-bounded-memory-benchmark\scripts\cloudarc_benchmark.py selfcheck --repo . --size-mib 2
+# flat SVG SLO badge from a result artifact
+python -B skills\cloudarc-bounded-memory-benchmark\scripts\cloudarc_benchmark.py badge --input benchmarks\results\ci-smoke.json --output docs\cloudarc-slo-badge.svg
+python -B skills\cloudarc-bounded-memory-benchmark\scripts\cloudarc_benchmark.py smoke --repo .
+```
+
+`selfcheck` fails closed with the `doctor` report when the repository is missing,
+so a reader who only has the skill gets an explanation instead of an import error.
+
+## Known limitations and honest status
+
+- **Where were these numbers measured?** The SLO table is the enforced contract.
+  The figures in `benchmarks/results/` and in the badge came from the reference
+  machines recorded inside each JSON artifact (Linux x86_64, Windows). Re-run
+  `selfcheck` or `smoke` to reproduce your own.
+- **Peak RSS includes the interpreter.** The 26-28 MiB figures contain roughly
+  25 MiB of CPython itself; the bounded-buffer pipeline adds about 2 MiB and does
+  not grow with payload size (1 -> 10 GiB spread is ~0.1 MiB).
+- **Environment-dependent defect found and fixed (1.1.1).** The suite asserted
+  `codec == "deflate"` unconditionally while the streaming packer prefers
+  `zstandard` whenever that optional package is installed: 50/51 with zstandard,
+  51/51 without, and CI never installed zstandard. The deflate case now patches
+  zstandard out, a zstd case covers the same bounded-chunk guarantee, and CI runs
+  a `zstandard` without/with matrix.
+- **Suite inventory guard.** `unittest discover` reports OK for whatever it can
+  import, so a test module that disappears shrinks the suite silently.
+  `tests/check_suite.py` fails the build unless every `tests/test_*.py` file
+  contributed tests and the total stays at or above the expected floor.
+- **Semantic search is optional.** The native ViBo semantic backend is not
+  shipped here; semantic requests return lexical results with an explicit reason.
+  The portable reference backend is lexical only.
+- **Cloud providers are placeholders.** Yandex Disk and Google Drive adapters
+  fail closed until token/OAuth handling and provider-specific range/sidecar
+  reads land. No cloud credentials are required or enabled anywhere in CI.
+- **Compression comparison caveat.** Deflate-based tools (`gzip`, `zip`,
+  `tar.gz`) use a 32 KiB window, so payloads whose repeats exceed that window
+  compress far worse than `zstd` or `7z`. The memory comparison is about RSS
+  behaviour, not compression ratio.
+- **10 GiB is not a pull-request gate.** The large profile runs only through the
+  manual workflow or an explicit local command, and needs tens of GiB of scratch
+  disk.
