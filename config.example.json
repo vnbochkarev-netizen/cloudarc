@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "default_disk": "local",
+  "year": "2026",
+  "smartbot_root": "SMARTBOT",
+  "week": "NN",
+  "project": "ProjectName",
+  "cloud_root": ".cloudarc/cloud",
+  "max_package_bytes": 2147483648,
+  "native": {
+    "mode": "auto",
+    "module_path": "",
+    "module_name": "vibo_archive"
+  },
+  "stats_root": "stats"
+}

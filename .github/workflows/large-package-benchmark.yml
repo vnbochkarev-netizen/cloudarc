@@ -1,0 +1,51 @@
+name: CloudArc Large Package Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      sizes_gib:
+        description: "Space-separated payload sizes in GiB"
+        required: false
+        default: "1 5 10"
+      file_count:
+        description: "High-cardinality multi-file smoke count"
+        required: false
+        default: "5000"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run 1/5/10 GiB benchmark
+        env:
+          SIZES_GIB: ${{ inputs.sizes_gib }}
+        run: |
+          python -B -m benchmarks.large_package \
+            --sizes-gib ${SIZES_GIB} \
+            --json-output benchmarks/results/large-package-linux-manual.json \
+            --markdown-output docs/LARGE_PACKAGE_BENCHMARK_LINUX_MANUAL.md \
+            --fail-on-slo
+      - name: Run high-cardinality multi-file benchmark
+        env:
+          FILE_COUNT: ${{ inputs.file_count }}
+        run: |
+          python -B -m benchmarks.large_package \
+            --multi-file \
+            --file-count ${FILE_COUNT} \
+            --file-size-kib 64 \
+            --duplicate-groups 256 \
+            --json-output benchmarks/results/multi-file-linux-manual.json \
+            --markdown-output docs/MULTI_FILE_BENCHMARK_LINUX_MANUAL.md \
+            --fail-on-slo
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudarc-large-package-benchmark
+          path: |
+            benchmarks/results/*.json
+            docs/*BENCHMARK*MANUAL.md

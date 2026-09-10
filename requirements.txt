@@ -1,0 +1,8 @@
+# CloudArc MVP uses the Python standard library.
+# Optional native/semantic integrations:
+# zstandard>=0.22
+# fastembed>=0.5
+# usearch>=2.15
+# requests>=2.31
+# google-api-python-client>=2.120
+# google-auth>=2.28

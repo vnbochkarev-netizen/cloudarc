@@ -1,0 +1,142 @@
+{
+  "schema": "cloudarc.large-package-benchmark",
+  "schema_version": 1,
+  "generated_at": "2026-09-10T18:12:26.815242+00:00",
+  "completion_status": "complete",
+  "environment": {
+    "platform": "linux",
+    "platform_detail": "Linux-6.8.0-137-generic-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "python": "3.11.15",
+    "processor": "x86_64"
+  },
+  "settings": {
+    "profile": "compressible-text",
+    "sizes_bytes": [
+      67108864
+    ],
+    "sample_interval_seconds": 0.05,
+    "operation_timeout_seconds": 7200.0,
+    "workload": {
+      "schema_version": 1,
+      "profile_version": 2,
+      "description": "sparse-token, highly compressible UTF-8 text for payload-scaling and deflate expansion",
+      "suffix": ".txt",
+      "generator_buffer_bytes": 1048576,
+      "seed_bytes": 65536,
+      "seed_sha256": "59ac9b284e1c4a7c286355acdddc367430b4b7b752dbec6bbdc72116add5754a"
+    }
+  },
+  "slo": {
+    "peak_rss_bytes_max": 268435456,
+    "peak_rss_spread_bytes_max": 67108864,
+    "pack_temp_ratio_max": 2.1,
+    "unpack_temp_ratio_max": 1.1,
+    "temp_fixed_allowance_bytes": 67108864
+  },
+  "runs": [
+    {
+      "status": "ok",
+      "size_bytes": 67108864,
+      "size_gib": 0.0625,
+      "profile": "compressible-text",
+      "generation_seconds": 0.106956,
+      "archive_size_bytes": 114958,
+      "disk_preflight": {
+        "free_bytes": 43006263296,
+        "required_bytes": 1214670438
+      },
+      "pack": {
+        "operation": "pack",
+        "wall_seconds": 4.041004,
+        "operation_seconds": 2.880675,
+        "baseline_rss_bytes": 25182208,
+        "worker_peak_rss_bytes": 28315648,
+        "peak_rss_bytes": 28327936,
+        "rss_delta_bytes": 3145728,
+        "peak_temp_bytes": 67211578,
+        "sampled_peak_temp_bytes": 67200150,
+        "operation_temp_floor_bytes": 67211578,
+        "temp_measurement_method": "sampled-with-operation-floor",
+        "sample_count": 61,
+        "rss_measurement_source": "linux-proc-status",
+        "worker": {
+          "raw_bytes": 67108864,
+          "packed_bytes": 114958,
+          "data_bytes": 102714,
+          "sidecar_bytes": 4813,
+          "methods": {
+            "deflate": 1
+          },
+          "entry_count": 1,
+          "dedup_entries": 0,
+          "manifest_entry_count": 1,
+          "index_document_count": 1,
+          "index_term_count": 7,
+          "temp_peak_floor_bytes": 67211578
+        },
+        "throughput_mib_per_second": 22.217,
+        "temp_to_input_ratio": 1.001531,
+        "slo": {
+          "peak_rss_pass": true,
+          "peak_temp_pass": true,
+          "peak_temp_limit_bytes": 208037478,
+          "pass": true
+        }
+      },
+      "unpack": {
+        "operation": "unpack",
+        "wall_seconds": 1.459004,
+        "operation_seconds": 0.331449,
+        "baseline_rss_bytes": 24813568,
+        "worker_peak_rss_bytes": 28131328,
+        "peak_rss_bytes": 28192768,
+        "rss_delta_bytes": 3379200,
+        "peak_temp_bytes": 67108864,
+        "sampled_peak_temp_bytes": 61865984,
+        "operation_temp_floor_bytes": 67108864,
+        "temp_measurement_method": "sampled-with-operation-floor",
+        "sample_count": 10,
+        "rss_measurement_source": "linux-proc-status",
+        "worker": {
+          "restored": 1,
+          "restored_files": 1,
+          "temp_peak_floor_bytes": 67108864
+        },
+        "throughput_mib_per_second": 193.092,
+        "temp_to_input_ratio": 1.0,
+        "slo": {
+          "peak_rss_pass": true,
+          "peak_temp_pass": true,
+          "peak_temp_limit_bytes": 140928614,
+          "pass": true
+        }
+      },
+      "case_seconds": 5.649439
+    }
+  ],
+  "evaluation": {
+    "requested_runs": 1,
+    "completed_runs": 1,
+    "completed_sizes_bytes": [
+      67108864
+    ],
+    "missing_sizes_bytes": [],
+    "all_requested_completed": true,
+    "pack": {
+      "completed_runs": 1,
+      "peak_rss_spread_bytes": 0,
+      "peak_rss_spread_pass": true,
+      "per_run_pass": true,
+      "pass": true
+    },
+    "unpack": {
+      "completed_runs": 1,
+      "peak_rss_spread_bytes": 0,
+      "peak_rss_spread_pass": true,
+      "per_run_pass": true,
+      "pass": true
+    },
+    "pass": true
+  }
+}

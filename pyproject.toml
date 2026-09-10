@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibo-cloudarc"
+version = "0.1.0"
+description = "Safe CloudArc CLI with a portable VIBO container reference backend"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+cloudarc = "cloudarc:main"
+cloudarc-benchmark = "benchmarks.large_package:main"
+
+[tool.setuptools]
+py-modules = ["cloudarc", "config"]
+packages = ["core", "cloud", "stats", "benchmarks"]

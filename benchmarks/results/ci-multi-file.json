@@ -1,0 +1,79 @@
+{
+  "status": "ok",
+  "profile": "multi-file-dedup",
+  "file_count": 512,
+  "file_size_bytes": 16384,
+  "raw_bytes": 8388608,
+  "duplicate_groups": 32,
+  "dedup_entries": 15,
+  "unique_entries": 497,
+  "dedup_ratio": 0.029297,
+  "manifest_entry_count": 512,
+  "index_document_count": 512,
+  "index_term_count": 1029,
+  "pack": {
+    "operation": "pack",
+    "wall_seconds": 2.767461,
+    "operation_seconds": 1.648915,
+    "baseline_rss_bytes": 24989696,
+    "worker_peak_rss_bytes": 33665024,
+    "peak_rss_bytes": 33665024,
+    "rss_delta_bytes": 8675328,
+    "peak_temp_bytes": 8445522,
+    "sampled_peak_temp_bytes": 1565510,
+    "operation_temp_floor_bytes": 8445522,
+    "temp_measurement_method": "sampled-with-operation-floor",
+    "sample_count": 35,
+    "rss_measurement_source": "linux-proc-status",
+    "worker": {
+      "raw_bytes": 8388608,
+      "packed_bytes": 1508596,
+      "data_bytes": 56914,
+      "sidecar_bytes": 1675331,
+      "methods": {
+        "deflate": 512
+      },
+      "entry_count": 512,
+      "dedup_entries": 15,
+      "manifest_entry_count": 512,
+      "index_document_count": 512,
+      "index_term_count": 1029,
+      "temp_peak_floor_bytes": 8445522
+    }
+  },
+  "unpack": {
+    "operation": "unpack",
+    "wall_seconds": 1.357993,
+    "operation_seconds": 0.226733,
+    "baseline_rss_bytes": 24944640,
+    "worker_peak_rss_bytes": 29216768,
+    "peak_rss_bytes": 29216768,
+    "rss_delta_bytes": 4272128,
+    "peak_temp_bytes": 8388608,
+    "sampled_peak_temp_bytes": 0,
+    "operation_temp_floor_bytes": 8388608,
+    "temp_measurement_method": "sampled-with-operation-floor",
+    "sample_count": 8,
+    "rss_measurement_source": "linux-proc-status",
+    "worker": {
+      "restored": 512,
+      "restored_files": 512,
+      "temp_peak_floor_bytes": 8388608
+    }
+  },
+  "slo": {
+    "peak_rss_pass": true,
+    "manifest_cardinality_pass": true,
+    "index_cardinality_pass": true
+  },
+  "evaluation": {
+    "pass": true,
+    "slo": {
+      "peak_rss_bytes_max": 536870912,
+      "pack_temp_ratio_max": 2.5,
+      "unpack_temp_ratio_max": 1.25,
+      "max_manifest_entries": 10000,
+      "max_index_documents": 10000
+    }
+  }
+}

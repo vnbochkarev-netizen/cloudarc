@@ -1,0 +1,286 @@
+{
+  "schema": "cloudarc.large-package-benchmark",
+  "schema_version": 1,
+  "generated_at": "2026-09-09T16:40:14.766191+00:00",
+  "completion_status": "complete",
+  "environment": {
+    "platform": "win32",
+    "platform_detail": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "python": "3.14.0",
+    "processor": "AMD64 Family 25 Model 116 Stepping 1, AuthenticAMD"
+  },
+  "settings": {
+    "profile": "compressible-text",
+    "sizes_bytes": [
+      1073741824,
+      5368709120,
+      10737418240
+    ],
+    "sample_interval_seconds": 0.05,
+    "operation_timeout_seconds": 7200.0,
+    "workload": {
+      "schema_version": 1,
+      "profile_version": 2,
+      "description": "sparse-token, highly compressible UTF-8 text for payload-scaling and deflate expansion",
+      "suffix": ".txt",
+      "generator_buffer_bytes": 1048576,
+      "seed_bytes": 65536,
+      "seed_sha256": "59ac9b284e1c4a7c286355acdddc367430b4b7b752dbec6bbdc72116add5754a"
+    }
+  },
+  "slo": {
+    "peak_rss_bytes_max": 268435456,
+    "peak_rss_spread_bytes_max": 67108864,
+    "pack_temp_ratio_max": 2.1,
+    "unpack_temp_ratio_max": 1.1,
+    "temp_fixed_allowance_bytes": 67108864
+  },
+  "runs": [
+    {
+      "status": "ok",
+      "size_bytes": 1073741824,
+      "size_gib": 1.0,
+      "profile": "compressible-text",
+      "generation_seconds": 1.157476,
+      "archive_size_bytes": 1655222,
+      "disk_preflight": {
+        "free_bytes": 27237822464,
+        "required_bytes": 3328599654
+      },
+      "pack": {
+        "operation": "pack",
+        "wall_seconds": 33.692505,
+        "operation_seconds": 33.496468,
+        "baseline_rss_bytes": 24064000,
+        "worker_peak_rss_bytes": 27230208,
+        "peak_rss_bytes": 27230208,
+        "rss_delta_bytes": 3166208,
+        "peak_temp_bytes": 1075384796,
+        "sampled_peak_temp_bytes": 1075384796,
+        "operation_temp_floor_bytes": 1075384796,
+        "temp_measurement_method": "sampled-with-operation-floor",
+        "sample_count": 658,
+        "rss_measurement_source": "windows-psapi-working-set",
+        "worker": {
+          "raw_bytes": 1073741824,
+          "packed_bytes": 1655222,
+          "data_bytes": 1642972,
+          "sidecar_bytes": 4819,
+          "methods": {
+            "deflate": 1
+          },
+          "temp_peak_floor_bytes": 1075384796
+        },
+        "throughput_mib_per_second": 30.57,
+        "temp_to_input_ratio": 1.00153,
+        "slo": {
+          "peak_rss_pass": true,
+          "peak_temp_pass": true,
+          "peak_temp_limit_bytes": 2321966694,
+          "pass": true
+        }
+      },
+      "unpack": {
+        "operation": "unpack",
+        "wall_seconds": 1.611157,
+        "operation_seconds": 1.421122,
+        "baseline_rss_bytes": 24002560,
+        "worker_peak_rss_bytes": 31145984,
+        "peak_rss_bytes": 31145984,
+        "rss_delta_bytes": 7143424,
+        "peak_temp_bytes": 1073741824,
+        "sampled_peak_temp_bytes": 0,
+        "operation_temp_floor_bytes": 1073741824,
+        "temp_measurement_method": "sampled-with-operation-floor",
+        "sample_count": 32,
+        "rss_measurement_source": "windows-psapi-working-set",
+        "worker": {
+          "restored": 1,
+          "temp_peak_floor_bytes": 1073741824
+        },
+        "throughput_mib_per_second": 720.557,
+        "temp_to_input_ratio": 1.0,
+        "slo": {
+          "peak_rss_pass": true,
+          "peak_temp_pass": true,
+          "peak_temp_limit_bytes": 1248224870,
+          "pass": true
+        }
+      },
+      "case_seconds": 36.655023
+    },
+    {
+      "status": "ok",
+      "size_bytes": 5368709120,
+      "size_gib": 5.0,
+      "profile": "compressible-text",
+      "generation_seconds": 42.743456,
+      "archive_size_bytes": 8226974,
+      "disk_preflight": {
+        "free_bytes": 27237773312,
+        "required_bytes": 12348030976
+      },
+      "pack": {
+        "operation": "pack",
+        "wall_seconds": 183.285597,
+        "operation_seconds": 183.053914,
+        "baseline_rss_bytes": 24035328,
+        "worker_peak_rss_bytes": 27013120,
+        "peak_rss_bytes": 27013120,
+        "rss_delta_bytes": 2977792,
+        "peak_temp_bytes": 5376923844,
+        "sampled_peak_temp_bytes": 5376923844,
+        "operation_temp_floor_bytes": 5376923844,
+        "temp_measurement_method": "sampled-with-operation-floor",
+        "sample_count": 3565,
+        "rss_measurement_source": "windows-psapi-working-set",
+        "worker": {
+          "raw_bytes": 5368709120,
+          "packed_bytes": 8226974,
+          "data_bytes": 8214724,
+          "sidecar_bytes": 4819,
+          "methods": {
+            "deflate": 1
+          },
+          "temp_peak_floor_bytes": 5376923844
+        },
+        "throughput_mib_per_second": 27.97,
+        "temp_to_input_ratio": 1.00153,
+        "slo": {
+          "peak_rss_pass": true,
+          "peak_temp_pass": true,
+          "peak_temp_limit_bytes": 11341398016,
+          "pass": true
+        }
+      },
+      "unpack": {
+        "operation": "unpack",
+        "wall_seconds": 75.952538,
+        "operation_seconds": 75.701933,
+        "baseline_rss_bytes": 24088576,
+        "worker_peak_rss_bytes": 32530432,
+        "peak_rss_bytes": 32530432,
+        "rss_delta_bytes": 8441856,
+        "peak_temp_bytes": 5368709120,
+        "sampled_peak_temp_bytes": 0,
+        "operation_temp_floor_bytes": 5368709120,
+        "temp_measurement_method": "sampled-with-operation-floor",
+        "sample_count": 1463,
+        "rss_measurement_source": "windows-psapi-working-set",
+        "worker": {
+          "restored": 1,
+          "temp_peak_floor_bytes": 5368709120
+        },
+        "throughput_mib_per_second": 67.634,
+        "temp_to_input_ratio": 1.0,
+        "slo": {
+          "peak_rss_pass": true,
+          "peak_temp_pass": true,
+          "peak_temp_limit_bytes": 5972688896,
+          "pass": true
+        }
+      },
+      "case_seconds": 302.351809
+    },
+    {
+      "status": "ok",
+      "size_bytes": 10737418240,
+      "size_gib": 10.0,
+      "profile": "compressible-text",
+      "generation_seconds": 125.24224,
+      "archive_size_bytes": 16441668,
+      "disk_preflight": {
+        "free_bytes": 29746520064,
+        "required_bytes": 23622320128
+      },
+      "pack": {
+        "operation": "pack",
+        "wall_seconds": 489.182928,
+        "operation_seconds": 488.937537,
+        "baseline_rss_bytes": 24186880,
+        "worker_peak_rss_bytes": 27136000,
+        "peak_rss_bytes": 27136000,
+        "rss_delta_bytes": 2949120,
+        "peak_temp_bytes": 10753847654,
+        "sampled_peak_temp_bytes": 10753847654,
+        "operation_temp_floor_bytes": 10753847654,
+        "temp_measurement_method": "sampled-with-operation-floor",
+        "sample_count": 9518,
+        "rss_measurement_source": "windows-psapi-working-set",
+        "worker": {
+          "raw_bytes": 10737418240,
+          "packed_bytes": 16441668,
+          "data_bytes": 16429414,
+          "sidecar_bytes": 4823,
+          "methods": {
+            "deflate": 1
+          },
+          "temp_peak_floor_bytes": 10753847654
+        },
+        "throughput_mib_per_second": 20.943,
+        "temp_to_input_ratio": 1.00153,
+        "slo": {
+          "peak_rss_pass": true,
+          "peak_temp_pass": true,
+          "peak_temp_limit_bytes": 22615687168,
+          "pass": true
+        }
+      },
+      "unpack": {
+        "operation": "unpack",
+        "wall_seconds": 494.855735,
+        "operation_seconds": 494.140349,
+        "baseline_rss_bytes": 24055808,
+        "worker_peak_rss_bytes": 32673792,
+        "peak_rss_bytes": 32673792,
+        "rss_delta_bytes": 8617984,
+        "peak_temp_bytes": 10737418240,
+        "sampled_peak_temp_bytes": 0,
+        "operation_temp_floor_bytes": 10737418240,
+        "temp_measurement_method": "sampled-with-operation-floor",
+        "sample_count": 9569,
+        "rss_measurement_source": "windows-psapi-working-set",
+        "worker": {
+          "restored": 1,
+          "temp_peak_floor_bytes": 10737418240
+        },
+        "throughput_mib_per_second": 20.723,
+        "temp_to_input_ratio": 1.0,
+        "slo": {
+          "peak_rss_pass": true,
+          "peak_temp_pass": true,
+          "peak_temp_limit_bytes": 11878268928,
+          "pass": true
+        }
+      },
+      "case_seconds": 1110.694106
+    }
+  ],
+  "evaluation": {
+    "requested_runs": 3,
+    "completed_runs": 3,
+    "completed_sizes_bytes": [
+      1073741824,
+      5368709120,
+      10737418240
+    ],
+    "missing_sizes_bytes": [],
+    "all_requested_completed": true,
+    "pack": {
+      "completed_runs": 3,
+      "peak_rss_spread_bytes": 217088,
+      "peak_rss_spread_pass": true,
+      "per_run_pass": true,
+      "pass": true
+    },
+    "unpack": {
+      "completed_runs": 3,
+      "peak_rss_spread_bytes": 1527808,
+      "peak_rss_spread_pass": true,
+      "per_run_pass": true,
+      "pass": true
+    },
+    "pass": true
+  }
+}

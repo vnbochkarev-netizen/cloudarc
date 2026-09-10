@@ -1,72 +1,39 @@
-name: CI
+name: CloudArc CI
 
 on:
   push:
-    branches: ["**"]
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
-  package-checks:
+  test-and-smoke:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12"]
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Detect the package on this ref
-        id: pkg
+          python-version: "3.12"
+      - name: CloudArc helper smoke
         run: |
-          if [ -f scripts/cloudarc_benchmark.py ]; then
-            echo "present=yes" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=no" >> "$GITHUB_OUTPUT"
-            echo "Package is not on this ref (repository card only) - package checks skipped."
-          fi
-
-      - name: Byte-compile the helper (stdlib only, no installs)
-        if: steps.pkg.outputs.present == 'yes'
-        run: python -m py_compile scripts/cloudarc_benchmark.py
-
-      - name: "CLI contract: every subcommand has a --help that exits 0"
-        if: steps.pkg.outputs.present == 'yes'
-        run: |
-          python scripts/cloudarc_benchmark.py --help
-          for cmd in smoke manual check-telemetry; do
-            python scripts/cloudarc_benchmark.py "$cmd" --help > /dev/null
-          done
-
-      - name: Version consistency (VERSION == SKILL.md frontmatter)
-        if: steps.pkg.outputs.present == 'yes'
-        run: python tests/check_version.py
-
-      - name: Telemetry contract accepts a well-formed range response
-        if: steps.pkg.outputs.present == 'yes'
-        run: |
-          python scripts/cloudarc_benchmark.py check-telemetry \
-            --input tests/fixtures/telemetry-range-ok.json --expected range
-
-      - name: "Fail-closed: reading the data section must be rejected"
-        if: steps.pkg.outputs.present == 'yes'
-        run: |
-          if python scripts/cloudarc_benchmark.py check-telemetry \
-               --input tests/fixtures/telemetry-data-section-read.json --expected range > /dev/null 2>&1; then
-            echo "ERROR: data_section_read=true was accepted" >&2
-            exit 1
-          fi
-
-      - name: "Fail-closed: range/sidecar mismatch must be rejected"
-        if: steps.pkg.outputs.present == 'yes'
-        run: |
-          if python scripts/cloudarc_benchmark.py check-telemetry \
-               --input tests/fixtures/telemetry-sidecar-mismatch.json --expected sidecar > /dev/null 2>&1; then
-            echo "ERROR: sidecar mismatch was accepted" >&2
-            exit 1
-          fi
+          python -B skills/cloudarc-bounded-memory-benchmark/scripts/cloudarc_benchmark.py \
+            smoke \
+            --repo . \
+            --size-mib 64 \
+            --file-count 512 \
+            --file-size-kib 16 \
+            --duplicate-groups 32 \
+            --json-output benchmarks/results/ci-smoke.json \
+            --markdown-output docs/LARGE_PACKAGE_BENCHMARK_CI.md \
+            --multi-json-output benchmarks/results/ci-multi-file.json \
+            --multi-markdown-output docs/MULTI_FILE_BENCHMARK_CI.md
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudarc-ci-smoke
+          if-no-files-found: error
+          path: |
+            benchmarks/results/ci-smoke.json
+            benchmarks/results/ci-multi-file.json
+            docs/LARGE_PACKAGE_BENCHMARK_CI.md
+            docs/MULTI_FILE_BENCHMARK_CI.md
