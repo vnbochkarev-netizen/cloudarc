@@ -6,6 +6,7 @@ import ctypes
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -113,38 +114,58 @@ class ProcessMemoryReader:
         )
 
     def _sample_linux(self) -> MemorySample:
+        """Read VmRSS/VmHWM from /proc/<pid>/status.
+
+        Between fork and exec (and while a process is a zombie) the status file
+        briefly has no VmRSS line even though the pid exists. That window is
+        microseconds wide on a fast host, so retry for a short bounded period
+        instead of failing the whole benchmark - observed as Linux CI failures
+        while the Windows path (psapi) never hit it.
+        """
+
         status_path = Path(f"/proc/{self.pid}/status")
-        try:
-            lines = status_path.read_text(encoding="ascii").splitlines()
-        except OSError as exc:
-            raise ResourceMeasurementError(
-                f"cannot read {status_path}"
-            ) from exc
-        values: dict[str, int] = {}
-        for line in lines:
-            if ":" not in line:
-                continue
-            name, raw = line.split(":", 1)
-            fields = raw.strip().split()
-            if not fields:
-                continue
-            if name in {"VmRSS", "VmHWM"}:
-                try:
-                    values[name] = int(fields[0]) * 1024
-                except ValueError as exc:
+        last_error = "no VmRSS line yet"
+        deadline = time.monotonic() + 0.5
+        while True:
+            try:
+                lines = status_path.read_text(encoding="ascii").splitlines()
+            except OSError as exc:
+                last_error = f"cannot read {status_path}"
+                lines = []
+                read_error = exc
+            else:
+                read_error = None
+            values: dict[str, int] = {}
+            for line in lines:
+                if ":" not in line:
+                    continue
+                name, raw = line.split(":", 1)
+                fields = raw.strip().split()
+                if not fields:
+                    continue
+                if name in {"VmRSS", "VmHWM"}:
+                    try:
+                        values[name] = int(fields[0]) * 1024
+                    except ValueError as exc:
+                        raise ResourceMeasurementError(
+                            f"invalid {name} value for process {self.pid}"
+                        ) from exc
+            rss = values.get("VmRSS")
+            if rss is not None:
+                return MemorySample(
+                    rss_bytes=rss,
+                    peak_rss_bytes=values.get("VmHWM", rss),
+                    source=self._source,
+                )
+            if time.monotonic() >= deadline:
+                if read_error is not None:
                     raise ResourceMeasurementError(
-                        f"invalid {name} value for process {self.pid}"
-                    ) from exc
-        rss = values.get("VmRSS")
-        if rss is None:
-            raise ResourceMeasurementError(
-                f"process {self.pid} has no VmRSS measurement"
-            )
-        return MemorySample(
-            rss_bytes=rss,
-            peak_rss_bytes=values.get("VmHWM", rss),
-            source=self._source,
-        )
+                        f"cannot read {status_path}"
+                    ) from read_error
+                raise ResourceMeasurementError(
+                    f"process {self.pid} has no VmRSS measurement"
+                )
+            time.sleep(0.002)
 
     def _sample_macos(self) -> MemorySample:
         completed = subprocess.run(
