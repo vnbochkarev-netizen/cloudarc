@@ -8,11 +8,20 @@ jobs:
   test-and-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+        zstandard: ["without", "with"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+      - name: Install optional zstandard (matrix leg)
+        if: matrix.zstandard == 'with'
+        run: python -m pip install --disable-pip-version-check zstandard
+
       - name: CloudArc helper smoke
         run: |
           python -B skills/cloudarc-bounded-memory-benchmark/scripts/cloudarc_benchmark.py \
@@ -30,7 +39,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cloudarc-ci-smoke
+          name: cloudarc-ci-smoke-${{ matrix.zstandard }}
           if-no-files-found: error
           path: |
             benchmarks/results/ci-smoke.json

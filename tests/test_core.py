@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib.util
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -116,6 +118,26 @@ class CoreArchiveTests(unittest.TestCase):
             )
 
     def test_deflate_expansion_writes_bounded_chunks(self):
+        """Deflate payloads must decode in bounded chunks.
+
+        ``zstandard`` is optional and the streaming packer prefers it when it is
+        installed, so patch it out here: the deflate path then stays covered on
+        every interpreter instead of only where zstandard happens to be missing.
+        """
+
+        with patch.dict(sys.modules, {"zstandard": None}):
+            self._assert_bounded_expansion("deflate")
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("zstandard") is not None,
+        "optional zstandard package is not installed",
+    )
+    def test_zstd_expansion_writes_bounded_chunks(self):
+        """The same bounded-chunk guarantee must hold for zstd payloads."""
+
+        self._assert_bounded_expansion("zstd")
+
+    def _assert_bounded_expansion(self, expected_codec):
         class BoundedSink:
             def __init__(self, limit):
                 self.limit = limit
@@ -139,7 +161,7 @@ class CoreArchiveTests(unittest.TestCase):
             archive = root / "expansion.vibo"
             pack([source], archive, apply=True)
             entry = read_manifest(archive)["entries"][0]
-            self.assertEqual(entry["codec"], "deflate")
+            self.assertEqual(entry["codec"], expected_codec)
 
             buffer_size = 64 * 1024
             sink = BoundedSink(buffer_size)
