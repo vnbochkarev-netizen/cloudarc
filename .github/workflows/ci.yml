@@ -22,6 +22,9 @@ jobs:
         if: matrix.zstandard == 'with'
         run: python -m pip install --disable-pip-version-check zstandard
 
+      - name: Test inventory guard (no silent test loss)
+        run: python tests/check_suite.py
+
       - name: CloudArc helper smoke
         run: |
           python -B skills/cloudarc-bounded-memory-benchmark/scripts/cloudarc_benchmark.py \
