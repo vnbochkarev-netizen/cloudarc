@@ -1,6 +1,14 @@
-# CloudArc Bounded-Memory Benchmark 1.4.0
+# CloudArc Bounded-Memory Benchmark 1.4.1
 
 **Release date:** 2026-09-11
+
+## Highlights (1.4.1)
+
+- The Yandex Disk provider accepts tokens issued with only
+  `cloud_api:disk.app_folder`: set `YANDEX_DISK_ROOT=app:/` and every request
+  stays inside the application folder (the default root is `disk:/`). A 401/403
+  now explains both scopes instead of guessing.
+- Root scope and permission errors are covered by tests (29 provider tests).
 
 ## Highlights (1.4.0)
 

@@ -110,7 +110,10 @@ provider does not implement range reads, CloudArc falls back to validated
 ### Yandex Disk (1.4.0)
 
 The Yandex Disk adapter talks to the REST API v1 and needs an OAuth token with
-the `disk.write` scope. Provide it either in the environment or in a file:
+`cloud_api:disk.read`/`cloud_api:disk.write`. A token issued with only
+`cloud_api:disk.app_folder` also works - set `YANDEX_DISK_ROOT=app:/` and every
+request stays inside the application folder. The token comes from the
+environment or from a file:
 
 ```bash
 export YANDEX_DISK_TOKEN=...          # or YANDEX_DISK_TOKEN_FILE=/path/to/token

@@ -111,6 +111,59 @@ class CredentialTests(unittest.TestCase):
         self.assertNotIn(TOKEN, str(caught.exception))
 
 
+class RootScopeTests(unittest.TestCase):
+    """A token with only cloud_api:disk.app_folder reaches just ``app:/``."""
+
+    def _meta_route(self):
+        return {
+            ("GET", "/resources"): (
+                200,
+                {
+                    "path": "/app:/2026/ROOT/tree.vibo",
+                    "type": "file",
+                    "size": 10,
+                    "modified": "2026-09-11T00:00:00+00:00",
+                    "name": "tree.vibo",
+                },
+            )
+        }
+
+    def test_default_root_is_the_whole_disk(self):
+        cloud, _ = make_cloud(self._meta_route())
+        self.assertEqual(cloud.root, "disk:/")
+        cloud.get_meta("2026/ROOT/tree.vibo")
+        self.assertEqual(
+            cloud._http.calls[0]["params"]["path"], "disk:/2026/ROOT/tree.vibo"
+        )
+
+    def test_app_folder_root_can_be_selected(self):
+        cloud, _ = make_cloud(self._meta_route(), root="app:/")
+        cloud.get_meta("2026/ROOT/tree.vibo")
+        self.assertEqual(
+            cloud._http.calls[0]["params"]["path"], "app:/2026/ROOT/tree.vibo"
+        )
+
+    def test_root_can_come_from_the_environment(self):
+        with patch.dict(os.environ, {"YANDEX_DISK_ROOT": "app:/"}, clear=True):
+            cloud = YandexCloud(TOKEN)
+        self.assertEqual(cloud.root, "app:/")
+
+    def test_a_root_without_a_scheme_is_rejected(self):
+        with self.assertRaises(CloudNotConfigured):
+            YandexCloud(TOKEN, root="disk")
+
+    def test_permission_error_explains_both_scopes(self):
+        cloud, _ = make_cloud(
+            {("GET", "/resources"): (403, {"message": "Forbidden"})}
+        )
+        with self.assertRaises(CloudNotConfigured) as caught:
+            cloud.list_folder("2026")
+        message = str(caught.exception)
+        self.assertIn("cloud_api:disk", message)
+        self.assertIn("YANDEX_DISK_ROOT", message)
+        self.assertNotIn(TOKEN, message)
+
+
 class PathSafetyTests(unittest.TestCase):
     def _cloud(self):
         cloud, transport = make_cloud()

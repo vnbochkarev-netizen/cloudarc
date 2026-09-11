@@ -40,9 +40,15 @@ from .base import DriveCloud
 
 DISK_API = "https://cloud-api.yandex.net/v1/disk"
 TOKEN_ENV = "YANDEX_DISK_TOKEN"
+ROOT_ENV = "YANDEX_DISK_ROOT"
 TOKEN_FILE_ENV = "YANDEX_DISK_TOKEN_FILE"
 DEFAULT_TOKEN_FILE = "~/.config/cloudarc/yd_token"
 DEFAULT_TIMEOUT = 60
+# "disk:/" needs cloud_api:disk.read/write; a token issued with only
+# cloud_api:disk.app_folder can still be used with root "app:/" (the folder the
+# OAuth application owns on the disk).
+DISK_ROOT = "disk:/"
+APP_FOLDER_ROOT = "app:/"
 LIST_LIMIT = 1000
 FIND_MAX_ITEMS = 2000
 FIND_MAX_DEPTH = 8
@@ -59,11 +65,28 @@ class YandexCloud(DriveCloud):
         *,
         base_url: str = DISK_API,
         timeout: int = DEFAULT_TIMEOUT,
+        root: str | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.root = self._normalize_root(
+            root or os.environ.get(ROOT_ENV) or DISK_ROOT
+        )
         self._token = token or self._token_from_environment()
         self._download_hrefs: dict[str, str] = {}
+
+    @staticmethod
+    def _normalize_root(root: str) -> str:
+        """``disk:/`` for a full-disk token, ``app:/`` for app-folder scope."""
+
+        cleaned = root.strip()
+        if not cleaned.endswith("/"):
+            cleaned = f"{cleaned}/"
+        if not cleaned.endswith(":/"):
+            raise CloudNotConfigured(
+                f"{ROOT_ENV} must look like 'disk:/' or 'app:/' (got {root!r})"
+            )
+        return cleaned
 
     # ------------------------------------------------------------------ setup
 
@@ -156,8 +179,10 @@ class YandexCloud(DriveCloud):
     def _decode(status: int, body: bytes) -> dict:
         if status in (401, 403):
             raise CloudNotConfigured(
-                "Yandex Disk rejected the token (HTTP "
-                f"{status}): check the OAuth token and its disk.write scope"
+                f"Yandex Disk rejected the token (HTTP {status}): the OAuth token "
+                "needs cloud_api:disk.read/write. A token issued with only "
+                "cloud_api:disk.app_folder works too - set "
+                f"{ROOT_ENV}=app:/ so the adapter stays inside the application folder"
             )
         if status == 404:
             raise CloudError("remote path not found on Yandex Disk")
@@ -196,9 +221,8 @@ class YandexCloud(DriveCloud):
             raise SafetyError(f"invalid remote path: {path}")
         return normalized
 
-    @staticmethod
-    def _api_path(relative: str) -> str:
-        return f"disk:/{relative}" if relative else "disk:/"
+    def _api_path(self, relative: str) -> str:
+        return f"{self.root}{relative}" if relative else self.root
 
     @staticmethod
     def _info(raw: dict) -> FileInfo:
