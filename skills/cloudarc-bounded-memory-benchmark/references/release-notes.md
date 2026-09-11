@@ -1,6 +1,13 @@
-# CloudArc Bounded-Memory Benchmark 1.2.1
+# CloudArc Bounded-Memory Benchmark 1.2.2
 
 **Release date:** 2026-09-11
+
+## Highlights (1.2.2)
+
+- Version drift fixed: `cloudarc.py version` reported `0.1.0-mvp` while
+  `pyproject.toml` said 1.2.1. `core/version.py` is now the single source of
+  truth and `tests/test_version.py` fails the build on any mismatch.
+- Product suite: 71 -> 76 tests.
 
 ## Highlights (1.2.1)
 

@@ -1,7 +1,7 @@
 # CloudArc MVP Architecture
 
 **Date:** 2026-09-09  
-**Version:** 0.1.0-mvp / manifest-schema-v2 / index-schema-v2 /
+**Version:** 1.2.2 / manifest-schema-v2 / index-schema-v2 /
 semantic-index-v2 / remote-search-v1.1 / large-package-slo-v1
 
 ## 1. Selected architecture

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from .version import VERSION
 from .errors import FormatError, SafetyError
 from .format import (
     read_header,
@@ -44,7 +45,7 @@ from .semantic import get_native_semantic_backend, probe_native
 from .squeeze_hints import predict
 
 
-TOOL_VERSION = "1.2.1"
+TOOL_VERSION = VERSION
 STREAM_BUFFER_SIZE = 1024 * 1024
 
 

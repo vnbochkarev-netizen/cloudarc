@@ -55,7 +55,7 @@ from core.safety import weekly_folder
 from stats.savings import append_action, append_savings, summarize
 
 
-VERSION = "0.1.0-mvp"
+from core.version import VERSION  # single source of truth (was stuck at 0.1.0-mvp)
 
 
 def _configure_stdio() -> None:

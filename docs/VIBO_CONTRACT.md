@@ -86,7 +86,7 @@ contract.
   "archive_id": "uuid",
   "created_at": "2026-09-07T00:00:00+00:00",
   "tool": "cloudarc",
-  "tool_version": "0.1.0-mvp",
+  "tool_version": "1.2.2",
   "dedup": true,
   "entry_count": 1,
   "raw_bytes": 1200,
