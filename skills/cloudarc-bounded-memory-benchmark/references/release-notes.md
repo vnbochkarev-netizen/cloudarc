@@ -1,3 +1,28 @@
+# CloudArc Bounded-Memory Benchmark 1.2.1
+
+**Release date:** 2026-09-11
+
+## Highlights (1.2.1)
+
+- Dogfooding a 556-file heterogeneous tree exposed three defects, all fixed in the
+  product: paths containing a `bin`/`var`/`etc` component were rejected anywhere
+  (any Node or Python CLI project lost its `bin/` directory); skipped files were
+  never reported (556 files in, 356 out, no signal); one symlink inside a
+  directory aborted the whole walk.
+- `pack --no-index` added: 169 MiB -> 29.7 MiB peak RSS on the same 64.1 MiB text
+  tree, archive and restore unchanged, `search.index_built = false`.
+- `pack`/`analyze` return `skipped`, `skipped_count`, `skipped_by_reason`; the CLI
+  warns on stderr about files that did not enter the archive.
+- README and `docs/LARGE_PACKAGE_SLO.md` now carry the measured heterogeneous-tree
+  RSS numbers next to the streaming 256 MiB SLO.
+- Product test suite: 59 -> 71 tests (`tests/test_safety_and_skips.py`),
+  `tests/check_suite.py` inventory guard OK, helper smoke PASS.
+
+## Highlights (1.2.0)
+
+- Helper `doctor`, `selfcheck` and `badge` commands; `[zstd]`/`[semantic]` extras;
+  lazy `zstandard` import.
+
 # CloudArc Bounded-Memory Benchmark 1.1.0
 
 **Release date:** 2026-09-10

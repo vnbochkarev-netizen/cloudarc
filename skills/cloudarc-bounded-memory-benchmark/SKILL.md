@@ -34,6 +34,9 @@ operation. Keep these limits unchanged unless the user explicitly approves a
 new contract:
 
 - peak RSS: `<= 256 MiB` for pack and unpack;
+  (streaming payloads only - the lexical index is built in memory, so a text-heavy
+  tree is measured differently: 64.1 MiB / 358 files = 169 MiB with the index and
+  29.7 MiB with `pack --no-index`. Report both when a tree is text-heavy.);
 - 1/5/10 GiB peak-RSS spread: `<= 64 MiB`;
 - pack staging: `<= 2.10 * payload + 64 MiB`;
 - unpack staging: `<= 1.10 * payload + 64 MiB`.
@@ -195,3 +198,15 @@ Read [references/contract.md](references/contract.md) when implementing or
 reviewing the detailed SLO, telemetry, resume, and CI contracts. Read
 [references/release-notes.md](references/release-notes.md) when handing the
 skill to another team or upgrading from an earlier package.
+
+## Skipped files and the index flag (1.2.1)
+
+`pack`/`analyze` now return `skipped`, `skipped_count` and `skipped_by_reason`
+(`protected` / `system` / `symlink`) and the CLI warns on stderr. Never treat a
+pack as complete without checking that count: protected subtrees (`.git`,
+`__pycache__`, `.venv`) and symlinks inside a directory are skipped by design.
+
+`pack --no-index` (also on `push`) skips lexical index construction for
+memory-bounded runs on text-heavy trees; the manifest records
+`search.index_built = false` and `search` returns nothing. The archive payload
+and restore path are unchanged.
