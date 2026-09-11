@@ -72,6 +72,27 @@ def _dump(value, as_json: bool) -> None:
         print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
+def _warn_skipped(result) -> None:
+    """Tell the user, out loud, about files that did not enter the archive.
+
+    Files skipped by the safety policy used to disappear silently: a 556-file tree
+    produced a 356-file archive with no signal at all.
+    """
+
+    if not isinstance(result, dict):
+        return
+    summary = result.get("skipped_summary") or {}
+    count = summary.get("count") or result.get("skipped_count") or 0
+    if not count:
+        return
+    reasons = summary.get("by_reason") or result.get("skipped_by_reason") or {}
+    detail = ", ".join(f"{name}: {value}" for name, value in sorted(reasons.items()))
+    print(
+        f"warning: {count} file(s) were not packed ({detail}); run with --json to list them",
+        file=sys.stderr,
+    )
+
+
 def _stats_writer(config: dict, config_path: Path):
     stats_root = resolve_from_config(config_path, config["stats_root"])
 
@@ -334,11 +355,12 @@ def _push(args, config: dict, config_path: Path) -> dict:
                 )
             else:
                 archive_path = Path(temp_dir) / archive_name
-                pack(
+                packed = pack(
                     [source],
                     archive_path,
                     dedup=args.dedup,
                     apply=True,
+                    index=not getattr(args, "no_index", False),
                     stats_writer=_stats_writer(config, config_path),
                     stats_context={
                         "disk": args.disk or config["default_disk"],
@@ -346,6 +368,7 @@ def _push(args, config: dict, config_path: Path) -> dict:
                     },
                     max_package_bytes=config.get("max_package_bytes"),
                 )
+                _warn_skipped(packed)
                 local_manifest, local_index = sidecar_paths(archive_path)
 
             remote_paths = [
@@ -528,6 +551,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("inputs", nargs="+")
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--dedup", action="store_true")
+    p.add_argument(
+        "--no-index",
+        action="store_true",
+        help="skip the lexical search index (much lower memory on large text trees; search returns nothing)",
+    )
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", "--yes", dest="apply", action="store_true")
     p.add_argument("--json", action="store_true")
@@ -561,6 +589,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--week")
     p.add_argument("--project")
     p.add_argument("--dedup", action="store_true")
+    p.add_argument(
+        "--no-index",
+        action="store_true",
+        help="skip the lexical search index (much lower memory on large text trees)",
+    )
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", "--yes", dest="apply", action="store_true")
     p.add_argument("--json", action="store_true")
@@ -629,6 +662,7 @@ def main(argv: list[str] | None = None) -> int:
                 dedup=args.dedup,
                 dry_run=effective_dry_run,
                 apply=args.apply,
+                index=not args.no_index,
                 stats_writer=_stats_writer(config, config_path),
                 stats_context={
                     "disk": config["default_disk"],
@@ -636,6 +670,7 @@ def main(argv: list[str] | None = None) -> int:
                 },
                 max_package_bytes=config.get("max_package_bytes"),
             )
+            _warn_skipped(result)
         elif command == "unpack":
             effective_dry_run = args.dry_run or not args.apply
             result = unpack(

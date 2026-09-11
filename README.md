@@ -46,7 +46,9 @@ Large packages use a bounded-buffer pipeline: source files are spooled and
 hashed in 1 MiB chunks, compression candidates stay on temporary disk, and
 unpack streams each entry into a staging file while checking its size and
 SHA-256. The search index and manifest are metadata and may be materialized in
-memory; payload bytes are not.
+memory; payload bytes are not. The lexical index *does* grow with the amount of
+text you pack - see the measurements and the `--no-index` escape hatch in
+[Known limitations](#known-limitations-and-honest-status).
 
 The large-package acceptance benchmark measures peak RSS and logical staging
 disk in isolated child processes:
@@ -121,6 +123,36 @@ python -B skills\cloudarc-bounded-memory-benchmark\scripts\cloudarc_benchmark.py
 so a reader who only has the skill gets an explanation instead of an import error.
 
 ## Known limitations and honest status
+
+- **Peak RSS on a heterogeneous tree is not the 26-28 MiB number (measured).**
+  That figure holds for single-stream payloads: packing one 256 MiB binary here
+  cost 26.6 MiB peak RSS. A *directory* of text and office files behaves
+  differently, because the lexical search index is materialized in memory: a
+  358-file / 64.1 MiB tree peaked at **169 MiB**, a 137 MiB text tree at 99 MiB,
+  and 18 MiB of docx/pdf (243 files) at 137 MiB. Budget roughly 1-3x the textual
+  payload unless you opt out:
+  ```bash
+  python3 cloudarc.py pack ./tree -o tree.vibo --apply --no-index   # 29.7 MiB peak on the same 64.1 MiB tree
+  ```
+  `--no-index` produces the same archive and restores identically; it stores an
+  empty index, so `search` returns nothing (the manifest records
+  `search.index_built = false`, and the sidecars are ~9 points smaller).
+- **Skipped files are reported, never silent (1.2.1).** Protected subtrees
+  (`.git`, `__pycache__`, `.venv`, `node_modules`), symlinks found while walking a
+  directory, and leading system paths are not packed. `pack`/`analyze` now return
+  `skipped`, `skipped_count` and `skipped_by_reason`, and the CLI prints a
+  `warning: N file(s) were not packed (...)` line on stderr (suppressed by
+  `--json`). Before 1.2.1 that information did not exist: a 556-file tree
+  produced a 356-file archive with no signal at all.
+- **`bin/`, `var/`, `etc/` are names, not system paths (1.2.1).** Only a
+  *leading* system directory (`/etc/...`, `/usr/...`, `/var/...`, `/proc/...`)
+  is refused. A project tree containing `bin/cli.js`, `var/cache.txt` or
+  `app/etc/config.yml` is packable; those files used to be dropped silently,
+  which cost any Node or Python CLI project its `bin/` directory.
+- **One symlink no longer aborts a whole directory (1.2.1).** A symlink found
+  inside a directory is skipped and reported with reason `symlink`; a symlink
+  passed explicitly on the command line is still refused (fail-closed), and
+  symlinks are never dereferenced.
 
 - **Where were these numbers measured?** The SLO table is the enforced contract.
   The figures in `benchmarks/results/` and in the badge came from the reference

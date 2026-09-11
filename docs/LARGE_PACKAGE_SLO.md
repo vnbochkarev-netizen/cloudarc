@@ -107,6 +107,16 @@ cardinality. It is not an O(1) claim for arbitrary manifests. Reports include
 duplicate count, deduplication ratio, manifest entries, index documents and
 index terms.
 
+**Measured on a heterogeneous tree (2026-09-11, Linux x86_64, Python 3.11).**
+The 26-28 MiB figures describe single-stream payloads (one 256 MiB binary: 26.6
+MiB peak). A directory of many text/office files keeps the lexical index in
+memory, so peak RSS tracks the textual payload: 64.1 MiB / 358 files -> 169 MiB,
+137 MiB of text -> 99 MiB, 18 MiB of docx/pdf / 243 files -> 137 MiB. Packing
+that 64.1 MiB tree with `--no-index` peaks at 29.7 MiB - the archive, the
+payload pipeline and the restore are unchanged, only search is empty. Treat the
+256 MiB SLO as a *streaming* claim: on text-heavy trees either pass `--no-index`
+or budget 1-3x the textual payload.
+
 ## Verification
 
 The acceptance profile passed on 2026-09-09 using Windows 11, AMD64 and Python

@@ -44,7 +44,7 @@ from .semantic import get_native_semantic_backend, probe_native
 from .squeeze_hints import predict
 
 
-TOOL_VERSION = "0.1.0-mvp"
+TOOL_VERSION = "1.2.1"
 STREAM_BUFFER_SIZE = 1024 * 1024
 
 
@@ -77,8 +77,37 @@ def _validate_pack_output(inputs: Iterable[str | Path], output_path: Path) -> No
             )
 
 
-def _discover_files(inputs: Iterable[str | Path]) -> list[SourceFile]:
+def _skip_reason(path: Path) -> str | None:
+    """Classify why a file cannot enter the archive (``None`` when it can).
+
+    The reason is reported to the caller instead of vanishing silently: a backup
+    that drops 200 of 556 files without saying so is worse than no backup.
+    """
+
+    try:
+        ensure_safe_input(path)
+    except SafetyError as exc:
+        message = str(exc)
+        if "protected path" in message:
+            return "protected"
+        if "system path" in message:
+            return "system"
+        return "unsafe"
+    return None
+
+
+def _discover_files(
+    inputs: Iterable[str | Path],
+) -> tuple[list[SourceFile], list[dict]]:
+    """Collect packable files and the files skipped inside the given trees.
+
+    An explicitly passed symlink is still rejected (fail-closed). A symlink found
+    while walking a directory is now *skipped and reported* instead of aborting
+    the whole directory, and protected subtrees are reported too.
+    """
+
     discovered: list[SourceFile] = []
+    skipped: list[dict] = []
     used_archive_paths: set[str] = set()
 
     for raw_input in inputs:
@@ -94,25 +123,23 @@ def _discover_files(inputs: Iterable[str | Path]) -> list[SourceFile]:
             root_name = source.name or "root"
             candidates = []
             for child in sorted(source.rglob("*")):
+                archive_path = (
+                    Path(root_name) / child.relative_to(source)
+                ).as_posix()
+                if child.is_symlink():
+                    skipped.append({"path": archive_path, "reason": "symlink"})
+                    continue
                 if not child.is_file():
                     continue
-                if child.is_symlink():
-                    raise SafetyError(f"symlink input is not allowed: {child}")
                 if not _is_within(source, child):
                     raise SafetyError(
                         f"input path escapes source directory: {child}"
                     )
-                try:
-                    ensure_safe_input(child)
-                except SafetyError:
-                    # Protected subtrees are ignored when packing a directory.
+                reason = _skip_reason(child)
+                if reason is not None:
+                    skipped.append({"path": archive_path, "reason": reason})
                     continue
-                candidates.append(
-                    (
-                        child,
-                        (Path(root_name) / child.relative_to(source)).as_posix(),
-                    )
-                )
+                candidates.append((child, archive_path))
         else:
             raise SafetyError(f"unsupported input path: {source}")
 
@@ -125,7 +152,16 @@ def _discover_files(inputs: Iterable[str | Path]) -> list[SourceFile]:
 
     if not discovered:
         raise SafetyError("no files found to pack")
-    return discovered
+    return discovered, skipped
+
+
+def _skipped_summary(skipped: list[dict]) -> dict:
+    """Count skipped files by reason for CLI output and JSON callers."""
+
+    by_reason: dict[str, int] = {}
+    for item in skipped:
+        by_reason[item["reason"]] = by_reason.get(item["reason"], 0) + 1
+    return {"count": len(skipped), "by_reason": by_reason}
 
 
 def _entry_id(index: int) -> str:
@@ -283,7 +319,7 @@ def _stream_estimate(
 
 
 def analyze(inputs: Iterable[str | Path]) -> dict:
-    files = _discover_files(inputs)
+    files, skipped = _discover_files(inputs)
     rows: list[dict] = []
     raw_total = 0
     packed_total = 0
@@ -319,6 +355,8 @@ def analyze(inputs: Iterable[str | Path]) -> dict:
         "estimated_packed_bytes": packed_total,
         "estimated_saved_bytes": saved,
         "estimated_saved_pct": round((saved / raw_total * 100) if raw_total else 0, 2),
+        "skipped": skipped,
+        "skipped_summary": _skipped_summary(skipped),
     }
 
 
@@ -384,18 +422,21 @@ def pack(
     dedup: bool = False,
     dry_run: bool = False,
     apply: bool = False,
+    index: bool = True,
     stats_writer=None,
     stats_context: dict | None = None,
     max_package_bytes: int | None = None,
 ) -> dict:
     input_values = list(inputs)
+    search_index = bool(index)
     output_input = Path(output).expanduser()
     if output_input.is_symlink():
         raise SafetyError(f"symlink output is not allowed: {output_input}")
     output_path = output_input.resolve()
     ensure_safe_input(output_path.parent)
     _validate_pack_output(input_values, output_path)
-    files = _discover_files(input_values)
+    files, skipped = _discover_files(input_values)
+    skipped_summary = _skipped_summary(skipped)
     raw_input_bytes = sum(item.source.stat().st_size for item in files)
     if dry_run:
         plan = analyze(input_values)
@@ -404,7 +445,10 @@ def pack(
                 "dry_run": True,
                 "output": str(output_path),
                 "dedup": dedup,
+                "index": index,
                 "requires_apply": not apply,
+                "skipped": skipped,
+                "skipped_summary": skipped_summary,
             }
         )
         if max_package_bytes and raw_input_bytes > max_package_bytes:
@@ -440,11 +484,12 @@ def pack(
     try:
         for position, source_file in enumerate(files):
             hint = predict(source_file.source)
+            searchable = bool(hint.searchable and search_index)
             raw_path = staging_dir / f"raw-{position:08d}.bin"
             raw_size, digest, text_info = _spool_source(
                 source_file.source,
                 raw_path,
-                searchable=hint.searchable,
+                searchable=searchable,
             )
             raw_total += raw_size
 
@@ -483,13 +528,13 @@ def pack(
                 "codec": codec,
                 "stored_size": payload_path.stat().st_size,
                 "chunk_id": chunk_id,
-                "searchable": hint.searchable,
+                "searchable": searchable,
             }
             if dedup_of:
                 entry["dedup_of"] = dedup_of
             entries.append(entry)
 
-            if hint.searchable and text_info is not None:
+            if searchable and text_info is not None:
                 index_documents.append(
                     {
                         "entry_id": entry["entry_id"],
@@ -524,6 +569,7 @@ def pack(
                 "index_schema": index["schema"],
                 "index_schema_version": index["schema_version"],
                 "default_mode": "lexical",
+                "index_built": search_index,
                 "lexical": {
                     "schema": "cloudarc.lexical-index",
                     "schema_version": 1,
@@ -570,8 +616,13 @@ def pack(
         "methods": methods,
         "header": header,
         "dedup": dedup,
+        "index_built": search_index,
+        "skipped": skipped,
+        "skipped_count": skipped_summary["count"],
+        "skipped_by_reason": skipped_summary["by_reason"],
         "search": {
             "mode": "lexical",
+            "index_built": search_index,
             "semantic_status": semantic["status"],
         },
     }
@@ -591,6 +642,7 @@ def pack(
                 "saved_bytes": saved_bytes,
                 "saved_pct": result["saved_pct"],
                 "methods": methods,
+                "skipped_count": skipped_summary["count"],
             }
         )
     return result

@@ -19,18 +19,41 @@ def _parts_lower(path: Path) -> set[str]:
     return {part.lower() for part in path.parts}
 
 
+def _leading_directory(resolved: Path) -> str | None:
+    """Return the first directory component below the filesystem root.
+
+    ``/root/app/bin/cli.js`` -> ``root``; ``/etc/passwd`` -> ``etc``.
+    Windows drive anchors (``C:\\``) are not directory components and yield ``None``.
+    """
+
+    parts = [
+        part
+        for part in resolved.parts
+        if part not in {"", "/", "\\", resolved.anchor}
+    ]
+    if not parts:
+        return None
+    head = parts[0].lower()
+    if len(head) == 2 and head.endswith(":"):
+        return None
+    return head
+
+
 def ensure_safe_input(path: Path) -> Path:
-    """Reject protected directories and return a resolved path."""
+    """Reject protected directories and return a resolved path.
+
+    A path is treated as a *system* path only when one of the protected roots is
+    its leading directory (``/etc/passwd``, ``/usr/bin/python3``). A user tree
+    that merely *contains* such a directory deeper down
+    (``~/projects/app/bin/cli.js``) is allowed: rejecting it silently dropped
+    legitimate project files from archives.
+    """
 
     resolved = path.expanduser().resolve(strict=False)
-    parts = _parts_lower(resolved)
-    if parts & PROTECTED_NAMES:
+    if _parts_lower(resolved) & PROTECTED_NAMES:
         raise SafetyError(f"protected path is not allowed: {path}")
-    if any(part in PROTECTED_ROOT_NAMES for part in parts):
-        # Do not reject a Windows drive name; only reject actual Unix-style
-        # protected directory components.
-        if any(part in {"etc", "usr", "var", "bin", "sbin", "boot", "proc", "sys"} for part in parts):
-            raise SafetyError(f"system path is not allowed: {path}")
+    if _leading_directory(resolved) in PROTECTED_ROOT_NAMES:
+        raise SafetyError(f"system path is not allowed: {path}")
     return resolved
 
 
