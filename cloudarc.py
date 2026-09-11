@@ -72,6 +72,15 @@ def _dump(value, as_json: bool) -> None:
         print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
+def _warn_codec(result) -> None:
+    """Print codec warnings (e.g. a silent deflate fallback) to stderr."""
+
+    if not isinstance(result, dict):
+        return
+    for message in result.get("warnings") or []:
+        print(f"warning: {message}", file=sys.stderr)
+
+
 def _warn_skipped(result) -> None:
     """Tell the user, out loud, about files that did not enter the archive.
 
@@ -361,6 +370,7 @@ def _push(args, config: dict, config_path: Path) -> dict:
                     dedup=args.dedup,
                     apply=True,
                     index=not getattr(args, "no_index", False),
+                    workers=getattr(args, "workers", None),
                     stats_writer=_stats_writer(config, config_path),
                     stats_context={
                         "disk": args.disk or config["default_disk"],
@@ -552,6 +562,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--dedup", action="store_true")
     p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="file-level parallelism (processes); default: min(4, cpu count); 1 disables the pool",
+    )
+    p.add_argument(
         "--no-index",
         action="store_true",
         help="skip the lexical search index (much lower memory on large text trees; search returns nothing)",
@@ -589,6 +605,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--week")
     p.add_argument("--project")
     p.add_argument("--dedup", action="store_true")
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="file-level parallelism (processes) for the pack step; default: min(4, cpu count)",
+    )
     p.add_argument(
         "--no-index",
         action="store_true",
@@ -663,6 +685,7 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=effective_dry_run,
                 apply=args.apply,
                 index=not args.no_index,
+                workers=getattr(args, "workers", None),
                 stats_writer=_stats_writer(config, config_path),
                 stats_context={
                     "disk": config["default_disk"],
@@ -671,6 +694,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_package_bytes=config.get("max_package_bytes"),
             )
             _warn_skipped(result)
+            _warn_codec(result)
         elif command == "unpack":
             effective_dry_run = args.dry_run or not args.apply
             result = unpack(

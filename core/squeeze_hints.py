@@ -92,6 +92,22 @@ def predict(path: Path) -> CompressionHint:
     )
 
 
+def zstd_available() -> bool:
+    """True when the optional ``zstandard`` package can be imported.
+
+    The CLI core stays dependency-free; zstandard is an optional accelerator
+    (and is baked into the packaged binary builds). When it is missing, text
+    payloads fall back to deflate - which is reported to the caller instead of
+    happening silently.
+    """
+
+    try:
+        import zstandard  # noqa: F401  # type: ignore
+    except Exception:
+        return False
+    return True
+
+
 def compress_portable(raw: bytes, hint: CompressionHint) -> tuple[bytes, str]:
     """Compress bytes with the portable reference codec.
 

@@ -50,6 +50,31 @@ memory; payload bytes are not. The lexical index *does* grow with the amount of
 text you pack - see the measurements and the `--no-index` escape hatch in
 [Known limitations](#known-limitations-and-honest-status).
 
+## Speed, codecs and parallelism (1.3.0, measured)
+
+| what | result |
+|---|---|
+| text, 64 MiB profile: archive | 114 973 KiB (deflate) -> **18 461 KiB (zstd) = 6.2x smaller** |
+| text, 64 MiB profile: pack | 22.2 -> 26.6 MiB/s (+20%); unpack 0.33 -> 0.12 s |
+| real 2.2 GB mixed tree (`--no-index --dedup`) | 1.44 GB archive, 14.76% saved, 27.6 s, 87 MiB peak RSS |
+| 4 x 32 MiB payloads, `--workers 4` | 18.22 s -> 5.13 s (**3.55x**), peak tree RSS 49 -> 155 MiB |
+| 4000 x 16 KiB, `--workers 4` | 10.28 s -> 4.50 s (**2.28x**), peak tree RSS 45 -> 117 MiB |
+| 50 tiny files, `--workers 4` | 0.063 s -> 0.083 s (**0.76x - the pool loses**) |
+
+`zstandard` is an optional accelerator (the CLI core keeps zero required
+dependencies; packaged binaries bake it in). When it is missing, the fallback to
+deflate is reported instead of silent:
+
+```
+warning: zstandard is not installed: text payloads fall back to deflate (slower and larger)...
+```
+
+`pack --workers N` spreads file work over processes. It is **not** the default:
+above 16 MiB total and with at least two files the pool is chosen automatically
+(2.3-3.7x measured), below that the sequential path is faster. The pool raises
+peak tree RSS to at most ~155 MiB (inside the SLO) and always warns when used;
+any pool failure falls back to sequential packing rather than failing.
+
 The large-package acceptance benchmark measures peak RSS and logical staging
 disk in isolated child processes:
 
