@@ -17,7 +17,7 @@ import re
 import subprocess
 import sys
 
-EXPECTED_MIN_TESTS = 59
+EXPECTED_MIN_TESTS = 100
 
 
 def main() -> int:

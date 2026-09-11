@@ -81,6 +81,15 @@ def _warn_codec(result) -> None:
         print(f"warning: {message}", file=sys.stderr)
 
 
+def _warn_metadata(result) -> None:
+    """Report metadata that could not be restored instead of failing quietly."""
+
+    if not isinstance(result, dict):
+        return
+    for message in result.get("metadata_warnings") or []:
+        print(f"warning: {message}", file=sys.stderr)
+
+
 def _warn_skipped(result) -> None:
     """Tell the user, out loud, about files that did not enter the archive.
 
@@ -371,6 +380,9 @@ def _push(args, config: dict, config_path: Path) -> dict:
                     apply=True,
                     index=not getattr(args, "no_index", False),
                     workers=getattr(args, "workers", None),
+                    metadata=not getattr(args, "no_metadata", False),
+                    allow_system=getattr(args, "allow_system", False),
+                    accept_changing=getattr(args, "accept_changing", False),
                     stats_writer=_stats_writer(config, config_path),
                     stats_context={
                         "disk": args.disk or config["default_disk"],
@@ -482,7 +494,14 @@ def _pull(args, config: dict, config_path: Path) -> dict:
                 remote_manifest,
                 remote_index,
             )
-            result = unpack(local_archive, output, apply=True)
+            result = unpack(
+                local_archive,
+                output,
+                apply=True,
+                restore_metadata=not getattr(args, "no_metadata", False),
+                allow_system=getattr(args, "allow_system", False),
+            )
+            _warn_metadata(result)
     except Exception as exc:
         _record_action(
             config_path,
@@ -555,6 +574,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("analyze", help="dry-run compression analysis")
     p.add_argument("inputs", nargs="+")
+    p.add_argument(
+        "--no-metadata",
+        action="store_true",
+        help="ignore permission bits, symlinks and directories (contents only)",
+    )
+    p.add_argument(
+        "--allow-system",
+        action="store_true",
+        help="allow inputs under /etc, /var, /usr ... (deliberate system backups)",
+    )
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("pack", help="pack files into a .vibo archive")
@@ -572,6 +601,21 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip the lexical search index (much lower memory on large text trees; search returns nothing)",
     )
+    p.add_argument(
+        "--no-metadata",
+        action="store_true",
+        help="store contents only: no permission bits, no symlink entries, no directory entries",
+    )
+    p.add_argument(
+        "--allow-system",
+        action="store_true",
+        help="allow inputs under /etc, /var, /usr ... (deliberate system backups)",
+    )
+    p.add_argument(
+        "--accept-changing",
+        action="store_true",
+        help="include files that are being written (live logs): skip them by default, store a torn snapshot with this flag",
+    )
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", "--yes", dest="apply", action="store_true")
     p.add_argument("--json", action="store_true")
@@ -579,6 +623,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("unpack", help="restore a .vibo archive")
     p.add_argument("archive")
     p.add_argument("-o", "--out", required=True)
+    p.add_argument(
+        "--no-metadata",
+        action="store_true",
+        help="restore contents only: do not apply recorded modes/mtimes",
+    )
+    p.add_argument(
+        "--allow-system",
+        action="store_true",
+        help="allow writing the restore below /etc, /var, /usr ...",
+    )
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", "--yes", dest="apply", action="store_true")
     p.add_argument("--json", action="store_true")
@@ -599,6 +653,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("push", help="pack if needed and upload archive")
+    p.add_argument(
+        "--accept-changing",
+        action="store_true",
+        help="include files that are being written (live logs) as a torn snapshot",
+    )
+    p.add_argument(
+        "--no-metadata",
+        action="store_true",
+        help="store contents only: no permission bits, no symlink entries, no directory entries",
+    )
+    p.add_argument(
+        "--allow-system",
+        action="store_true",
+        help="allow inputs under /etc, /var, /usr ... (deliberate system backups)",
+    )
     p.add_argument("source")
     p.add_argument("--disk", choices=["local", "yd", "gd"])
     p.add_argument("--folder")
@@ -621,6 +690,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("pull", help="download an archive and unpack it")
+    p.add_argument(
+        "--no-metadata",
+        action="store_true",
+        help="restore contents only: do not apply recorded modes/mtimes",
+    )
+    p.add_argument(
+        "--allow-system",
+        action="store_true",
+        help="allow writing the restore below /etc, /var, /usr ...",
+    )
     p.add_argument("remote")
     p.add_argument("--disk", choices=["local", "yd", "gd"])
     p.add_argument("--week")
@@ -675,7 +754,11 @@ def main(argv: list[str] | None = None) -> int:
         command = args.command
 
         if command == "analyze":
-            result = analyze(args.inputs)
+            result = analyze(
+                args.inputs,
+                metadata=not getattr(args, "no_metadata", False),
+                allow_system=getattr(args, "allow_system", False),
+            )
         elif command == "pack":
             effective_dry_run = args.dry_run or not args.apply
             result = pack(
@@ -692,6 +775,9 @@ def main(argv: list[str] | None = None) -> int:
                     "project": config["project"],
                 },
                 max_package_bytes=config.get("max_package_bytes"),
+                metadata=not getattr(args, "no_metadata", False),
+                allow_system=getattr(args, "allow_system", False),
+                accept_changing=getattr(args, "accept_changing", False),
             )
             _warn_skipped(result)
             _warn_codec(result)
@@ -702,7 +788,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.out,
                 dry_run=effective_dry_run,
                 apply=args.apply,
+                restore_metadata=not getattr(args, "no_metadata", False),
+                allow_system=getattr(args, "allow_system", False),
             )
+            _warn_metadata(result)
         elif command == "info":
             result = info_archive(args.archive)
         elif command == "list":
@@ -758,7 +847,14 @@ def main(argv: list[str] | None = None) -> int:
 
         _dump(result, getattr(args, "json", False))
         return 0
-    except (CloudArcError, FileNotFoundError, PermissionError, ValueError) as exc:
+    except (
+        CloudArcError,
+        FileNotFoundError,
+        PermissionError,
+        ValueError,
+        OverflowError,
+        OSError,
+    ) as exc:
         payload = {"error": type(exc).__name__, "message": str(exc)}
         if getattr(args, "json", False):
             print(json.dumps(payload, ensure_ascii=False, indent=2))

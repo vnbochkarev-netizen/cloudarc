@@ -107,10 +107,29 @@ fixed header, manifest and index. They never read the data section. If a
 provider does not implement range reads, CloudArc falls back to validated
 `.manifest.json` and `.index.json` sidecars.
 
-Yandex Disk and Google Drive adapters are explicit P0 placeholders. They fail
-closed until token loading, OAuth refresh, and provider-specific range/sidecar
-reads are implemented. No cloud credentials or providers are connected in this
-MVP.
+### Yandex Disk (1.4.0)
+
+The Yandex Disk adapter talks to the REST API v1 and needs an OAuth token with
+the `disk.write` scope. Provide it either in the environment or in a file:
+
+```bash
+export YANDEX_DISK_TOKEN=...          # or YANDEX_DISK_TOKEN_FILE=/path/to/token
+cloudarc.py push ./tree --disk yd --week 36 --project Weekly --apply
+cloudarc.py ls-cloud --disk yd --week 36 --project Weekly
+cloudarc.py open  2026/ROOT/неделя-36/Weekly/tree.vibo info
+cloudarc.py open  2026/ROOT/неделя-36/Weekly/tree.vibo search "connection refused"
+cloudarc.py pull  2026/ROOT/неделя-36/Weekly/tree.vibo --week 36 --project Weekly -o ./restored --apply
+```
+
+`open`/`fetch` read the archive header, manifest and index with HTTP `Range`
+requests, so a remote search downloads a few kilobytes instead of the archive.
+Uploads are two-step (a ticket URL, then a streamed `PUT` with `Content-Length`),
+downloads are size-verified, and every mutation still requires `--apply`. The
+token is read from the environment or a file, never printed, and a missing token
+fails closed with a message naming the environment variable to set.
+
+Google Drive remains an explicit placeholder that fails closed until OAuth
+credentials and provider-specific reads are implemented.
 
 ## Repository layout
 
@@ -147,6 +166,49 @@ python -B skills\cloudarc-bounded-memory-benchmark\scripts\cloudarc_benchmark.py
 `selfcheck` fails closed with the `doctor` report when the repository is missing,
 so a reader who only has the skill gets an explanation instead of an import error.
 
+## Restoring a server, not just file contents (1.4.0)
+
+Up to 1.3.1 a restore returned file *contents*: permission bits were dropped
+(`640` came back as `644`), symlinks were skipped, and empty directories
+disappeared. Packing a real tree showed it plainly - 375 of 3919 files survived
+and every mode came back as `644`. A backup you cannot rebuild a machine from is
+not a backup, so 1.4.0 records and restores metadata:
+
+- every entry carries `kind` (`file` / `symlink` / `dir`), `mode`, `mtime_ns`;
+  symlink entries also carry `target` (the link target string is the payload, and
+  the link is never followed while packing);
+- empty directories survive as `dir` entries, and directory permissions are
+  applied after their children exist;
+- `unpack` is two-pass: files and directories first, links afterwards, so no
+  entry can be written *through* a link and escape the output tree. An archive
+  that declares a symlink and then stores anything below it is refused at
+  validation time (`archive writes through a symlink`);
+- `pack --no-metadata` / `unpack --no-metadata` keep the old contents-only
+  behaviour, and archives written by 1.3.x still restore unchanged;
+- the input directory itself is an entry, so its own mode and timestamp are
+  restored too (a private `0700` tree no longer comes back as `0755`), a tree made
+  only of symlinks or empty directories round-trips, and an over-the-top restore
+  that meets a dangling symlink no longer dies in the pre-overwrite backup;
+- an archive with directory or link entries - that is, any directory input -
+  declares **format version 2**, so a 1.3.x reader refuses it
+  (`unsupported VIBO format version`) instead of restoring a directory as an
+  empty file and a symlink as a small text file. Packing single files stays
+  version 1 and older readers keep reading those;
+- `--allow-system` lifts *only* the system-root refusal, so `/var/log` can be
+  backed up on purpose; `.git`, `node_modules` and caches stay out in any case.
+
+Verify a restore instead of trusting it:
+
+```bash
+python3 cloudarc.py pack /srv/data -o data.vibo --apply --json
+python3 cloudarc.py unpack data.vibo -o /srv/restore --apply --json
+CLOUDARC_SRC=. python3 scripts/verify_restore.py data.vibo /srv/data /srv/restore
+# -> {"entries_checked": 249, "problems": [], "verdict": "OK"}
+```
+
+The checker compares kind, content hash, permission bits and modification time
+for every manifest entry against the original tree.
+
 ## Known limitations and honest status
 
 - **Peak RSS on a heterogeneous tree is not the 26-28 MiB number (measured).**
@@ -163,8 +225,8 @@ so a reader who only has the skill gets an explanation instead of an import erro
   empty index, so `search` returns nothing (the manifest records
   `search.index_built = false`, and the sidecars are ~9 points smaller).
 - **Skipped files are reported, never silent (1.2.1).** Protected subtrees
-  (`.git`, `__pycache__`, `.venv`, `node_modules`), symlinks found while walking a
-  directory, and leading system paths are not packed. `pack`/`analyze` now return
+  (`.git`, `__pycache__`, `.venv`, `node_modules`), leading system paths (unless
+  `--allow-system`) and special files (FIFOs, sockets) are not packed. `pack`/`analyze` now return
   `skipped`, `skipped_count` and `skipped_by_reason`, and the CLI prints a
   `warning: N file(s) were not packed (...)` line on stderr (suppressed by
   `--json`). Before 1.2.1 that information did not exist: a 556-file tree
@@ -174,10 +236,11 @@ so a reader who only has the skill gets an explanation instead of an import erro
   is refused. A project tree containing `bin/cli.js`, `var/cache.txt` or
   `app/etc/config.yml` is packable; those files used to be dropped silently,
   which cost any Node or Python CLI project its `bin/` directory.
-- **One symlink no longer aborts a whole directory (1.2.1).** A symlink found
-  inside a directory is skipped and reported with reason `symlink`; a symlink
-  passed explicitly on the command line is still refused (fail-closed), and
-  symlinks are never dereferenced.
+- **One symlink no longer aborts a whole directory (1.2.1).** A symlink passed
+  explicitly on the command line is refused (fail-closed), and symlinks are never
+  dereferenced. Since 1.4.0 a symlink found while walking a directory is *stored*
+  as a link entry and recreated on unpack (see "Restoring a server" below);
+  before 1.4.0 it was skipped and reported with reason `symlink`.
 
 - **Where were these numbers measured?** The SLO table is the enforced contract.
   The figures in `benchmarks/results/` and in the badge came from the reference
@@ -199,9 +262,11 @@ so a reader who only has the skill gets an explanation instead of an import erro
 - **Semantic search is optional.** The native ViBo semantic backend is not
   shipped here; semantic requests return lexical results with an explicit reason.
   The portable reference backend is lexical only.
-- **Cloud providers are placeholders.** Yandex Disk and Google Drive adapters
-  fail closed until token/OAuth handling and provider-specific range/sidecar
-  reads land. No cloud credentials are required or enabled anywhere in CI.
+- **Cloud provider status.** Yandex Disk (REST v1, OAuth token) is implemented
+  and unit-tested offline; its live behaviour against a real account has to be
+  verified per deployment. Google Drive stays a fail-closed placeholder. No cloud
+  credentials are required or enabled anywhere in CI: the provider tests replace
+  both network seams.
 - **Compression comparison caveat.** Deflate-based tools (`gzip`, `zip`,
   `tar.gz`) use a 32 KiB window, so payloads whose repeats exceed that window
   compress far worse than `zstd` or `7z`. The memory comparison is about RSS

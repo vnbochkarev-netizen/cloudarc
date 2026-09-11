@@ -39,7 +39,7 @@ def _leading_directory(resolved: Path) -> str | None:
     return head
 
 
-def ensure_safe_input(path: Path) -> Path:
+def ensure_safe_input(path: Path, *, allow_system: bool = False) -> Path:
     """Reject protected directories and return a resolved path.
 
     A path is treated as a *system* path only when one of the protected roots is
@@ -47,14 +47,32 @@ def ensure_safe_input(path: Path) -> Path:
     that merely *contains* such a directory deeper down
     (``~/projects/app/bin/cli.js``) is allowed: rejecting it silently dropped
     legitimate project files from archives.
+
+    ``allow_system=True`` lifts only the *system root* refusal, so that a log or
+    data directory such as ``/var/log`` can be backed up on purpose. It never
+    lifts the ``PROTECTED_NAMES`` refusal (``.git``, ``node_modules``, caches):
+    those are re-creatable by design and stay out of archives.
     """
 
     resolved = path.expanduser().resolve(strict=False)
     if _parts_lower(resolved) & PROTECTED_NAMES:
         raise SafetyError(f"protected path is not allowed: {path}")
-    if _leading_directory(resolved) in PROTECTED_ROOT_NAMES:
+    if not allow_system and _leading_directory(resolved) in PROTECTED_ROOT_NAMES:
         raise SafetyError(f"system path is not allowed: {path}")
     return resolved
+
+
+def protected_name_reason(path: Path) -> str | None:
+    """Lexical protected-name check that never follows a symlink.
+
+    Used for entries whose link must be preserved rather than resolved: calling
+    :func:`ensure_safe_input` on them would follow the link and (for a link into
+    ``/etc``) report a "system path" for a file that only *points* there.
+    """
+
+    if _parts_lower(path) & PROTECTED_NAMES:
+        return "protected"
+    return None
 
 
 def ensure_within(root: Path, candidate: Path) -> Path:
@@ -115,7 +133,11 @@ def backup_existing(path: Path) -> Path | None:
         index += 1
 
     if path.is_dir():
-        shutil.copytree(path, candidate)
+        # A tree can legitimately contain dangling symlinks (CloudArc 1.4.0
+        # stores them on purpose). copytree without ``symlinks=True`` follows
+        # them and dies with "[Errno 2] No such file or directory", leaving a
+        # half-written backup behind.
+        shutil.copytree(path, candidate, symlinks=True, ignore_dangling_symlinks=True)
     else:
         candidate.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, candidate)

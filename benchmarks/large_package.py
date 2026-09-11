@@ -639,6 +639,7 @@ def run_multi_file_case(
                 dedup_entries / dataset["file_count"], 6
             ),
             "manifest_entry_count": pack_payload.get("manifest_entry_count"),
+            "kinds": pack_payload.get("kinds"),
             "index_document_count": pack_payload.get("index_document_count"),
             "index_term_count": pack_payload.get("index_term_count"),
             "pack": pack_result,
@@ -1120,6 +1121,7 @@ def _worker(
                 if entry.get("dedup_of")
             ),
             "manifest_entry_count": result["entry_count"],
+            "kinds": result.get("kinds"),
             "index_document_count": len(
                 index_payload.get("lexical", {}).get("documents", {})
             ),

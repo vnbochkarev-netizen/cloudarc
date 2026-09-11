@@ -78,15 +78,40 @@ def validate_benchmark_artifacts(
         if result.get("status") != "ok" or result.get("profile") != profile:
             raise HelperError(f"multi-file benchmark identity is invalid: {json_path}")
         file_count = result.get("file_count")
+        manifest_entries = result.get("manifest_entry_count")
+        index_documents = result.get("index_document_count")
         if (
             isinstance(file_count, bool)
             or not isinstance(file_count, int)
             or file_count <= 0
-            or result.get("manifest_entry_count") != file_count
-            or result.get("index_document_count") != file_count
+            or isinstance(manifest_entries, bool)
+            or not isinstance(manifest_entries, int)
+            or isinstance(index_documents, bool)
+            or not isinstance(index_documents, int)
         ):
             raise HelperError(
                 f"multi-file benchmark cardinality is inconsistent: {json_path}"
+            )
+        # Since 1.4.0 the manifest carries one entry per file *and* one per
+        # directory (the input root included), while the search index holds the
+        # files only. Verify both sides against the reported kinds instead of
+        # demanding manifest entries == files, which is no longer true.
+        kinds = result.get("kinds")
+        if isinstance(kinds, dict) and kinds:
+            counted = sum(
+                int(value) for value in kinds.values() if isinstance(value, int)
+            )
+            if int(kinds.get("file", 0)) != file_count or counted != manifest_entries:
+                raise HelperError(
+                    f"multi-file benchmark manifest cardinality is inconsistent: {json_path}"
+                )
+        elif manifest_entries != file_count:
+            raise HelperError(
+                f"multi-file benchmark manifest cardinality is inconsistent: {json_path}"
+            )
+        if index_documents != file_count:
+            raise HelperError(
+                f"multi-file benchmark index cardinality is inconsistent: {json_path}"
             )
         heading = "# CloudArc Multi-File Benchmark"
     else:

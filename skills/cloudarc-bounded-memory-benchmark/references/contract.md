@@ -99,4 +99,8 @@ lists and never invokes a shell. Its commands are:
 - `manual`: explicit large payload and high-cardinality runs, gated by
   `--yes`;
 - `check-telemetry`: JSON-only validation of range/sidecar counters, RSS
-  fields, and the `data_section_read=false` invariant.
+  fields, and the `data_section_read=false` invariant;
+- `doctor`: environment and repository readiness without running a benchmark;
+- `selfcheck`: the smallest self-contained proof - a small pack/unpack with real
+  RSS numbers against the 256 MiB SLO;
+- `badge`: render the flat SVG SLO badge from a previous result artifact.

@@ -21,8 +21,8 @@ cloudarc.py
   |       +-- core.safety      path, backup and confirmation policy
   |
   +-- cloud.base ---------- provider contract + sidecar/range reads
-  |       +-- cloud.local       implemented MVP provider
-  |       +-- cloud.yandex      fail-closed P0 stub
+  |       +-- cloud.local       implemented local provider (tests, dry runs)
+  |       +-- cloud.yandex      Yandex Disk REST v1 (OAuth token, HTTP ranges)
   |       +-- cloud.google      fail-closed P0 stub
   |       +-- cloud.protocol    remote-search v1.1 / v1.0 reader
   |
@@ -48,8 +48,9 @@ cloudarc.py
 9. Archive/sidecar publication is staged and verified before an `applied`
    action is recorded.
 10. Cloud mutations are dry-run by default; `--apply` is mandatory.
-11. Yandex and Google adapters fail closed until credentials and provider
-    tests exist.
+11. Cloud mutations require `--apply`; without credentials the Yandex adapter
+    fails closed with a message naming the environment variable, and Google Drive
+    stays a placeholder until OAuth credentials exist.
 12. The supplied commercial ViBo skill is not activated or licensed.
 
 ## 3. Defect-first hardening applied
@@ -121,7 +122,7 @@ for unpack; the machine-readable evidence is in
 | Native semantic negotiation | Adapter implemented; requires Linux CPython 3.11 and explicit capability |
 | Optional zstd | Used when the package is installed |
 | Native `vibo_archive` from supplied skill | Preflight only; no license activation |
-| Yandex Disk | Placeholder; fails closed |
+| Yandex Disk | REST v1 adapter: list/meta/folder/upload/download/delete/find/range reads; token from env or file |
 | Google Drive | Placeholder; fails closed |
 
 ## 6. Non-goals for this MVP

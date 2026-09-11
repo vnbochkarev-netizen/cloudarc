@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import os
 import shutil
+import stat
 import tempfile
 import uuid
 import zlib
@@ -14,8 +15,10 @@ from pathlib import Path
 from typing import Iterable
 
 from .version import VERSION
-from .errors import CloudArcError, FormatError, SafetyError
+from .errors import CloudArcError, FormatError, SafetyError, SourceChangedError
 from .format import (
+    FORMAT_VERSION,
+    METADATA_FORMAT_VERSION,
     read_header,
     read_index,
     read_manifest,
@@ -34,6 +37,7 @@ from .index import (
 from .manifest import (
     MANIFEST_SCHEMA,
     MANIFEST_SCHEMA_VERSION,
+    MAX_LINK_TARGET_BYTES,
     validate_manifest_index_alignment,
 )
 from .models import CompressionHint, SourceFile
@@ -41,6 +45,7 @@ from .safety import (
     backup_existing,
     ensure_safe_input,
     ensure_within,
+    protected_name_reason,
 )
 from .semantic import get_native_semantic_backend, probe_native
 from .squeeze_hints import predict, zstd_available
@@ -64,7 +69,12 @@ def _is_within(root: Path, candidate: Path) -> bool:
         return False
 
 
-def _validate_pack_output(inputs: Iterable[str | Path], output_path: Path) -> None:
+def _validate_pack_output(
+    inputs: Iterable[str | Path],
+    output_path: Path,
+    *,
+    allow_system: bool = False,
+) -> None:
     """Reject an output path inside an input tree.
 
     Without this guard a second pack of ``source`` could ingest its previous
@@ -72,14 +82,14 @@ def _validate_pack_output(inputs: Iterable[str | Path], output_path: Path) -> No
     """
 
     for raw_input in inputs:
-        source = ensure_safe_input(Path(raw_input))
+        source = ensure_safe_input(Path(raw_input), allow_system=allow_system)
         if source == output_path or _is_within(source, output_path):
             raise SafetyError(
                 f"output must not be inside an input path: {output_path}"
             )
 
 
-def _skip_reason(path: Path) -> str | None:
+def _skip_reason(path: Path, *, allow_system: bool = False) -> str | None:
     """Classify why a file cannot enter the archive (``None`` when it can).
 
     The reason is reported to the caller instead of vanishing silently: a backup
@@ -87,7 +97,7 @@ def _skip_reason(path: Path) -> str | None:
     """
 
     try:
-        ensure_safe_input(path)
+        ensure_safe_input(path, allow_system=allow_system)
     except SafetyError as exc:
         message = str(exc)
         if "protected path" in message:
@@ -98,63 +108,197 @@ def _skip_reason(path: Path) -> str | None:
     return None
 
 
+def _link_target_reason(target: str) -> str | None:
+    """Reject link targets that cannot be stored or restored faithfully."""
+
+    if not target or "\x00" in target:
+        return "symlink-target"
+    if len(target.encode("utf-8", "surrogateescape")) > MAX_LINK_TARGET_BYTES:
+        return "symlink-target"
+    return None
+
+
 def _discover_files(
     inputs: Iterable[str | Path],
+    *,
+    meta_dir: Path | None = None,
+    metadata: bool = True,
+    allow_system: bool = False,
 ) -> tuple[list[SourceFile], list[dict]]:
-    """Collect packable files and the files skipped inside the given trees.
+    """Collect packable entries and the entries skipped inside the given trees.
 
-    An explicitly passed symlink is still rejected (fail-closed). A symlink found
-    while walking a directory is now *skipped and reported* instead of aborting
-    the whole directory, and protected subtrees are reported too.
+    With ``metadata`` (the default) a pack is *restorable*, not merely a copy of
+    file contents:
+
+    * every entry records its permission bits (``mode``) and ``mtime_ns``;
+    * directories become zero-length ``dir`` entries, so an empty directory
+      survives the round trip and directory permissions can be restored;
+    * symlinks become ``symlink`` entries whose payload is the link target. The
+      link is never followed while packing, so the archive cannot be dragged
+      outside the input tree through it, and a restore recreates the same link.
+
+    An explicitly passed symlink is still rejected (fail-closed). Protected
+    subtrees (``.git``, caches, system roots) are skipped and reported;
+    ``allow_system=True`` lifts only the *system root* refusal so that a
+    deliberate backup of e.g. ``/var/log`` is possible.
     """
 
     discovered: list[SourceFile] = []
     skipped: list[dict] = []
     used_archive_paths: set[str] = set()
+    protected_prefixes: list[str] = []
+    payload_dir: Path | None = None
+    payload_index = 0
+    if metadata and meta_dir is not None:
+        payload_dir = Path(meta_dir)
+        payload_dir.mkdir(parents=True, exist_ok=True)
+
+    def _payload(data: bytes) -> Path | None:
+        """Stage a synthetic payload (link target or empty directory marker)."""
+
+        nonlocal payload_index
+        if payload_dir is None:
+            return None
+        path = payload_dir / f"meta-{payload_index:08d}.bin"
+        payload_index += 1
+        path.write_bytes(data)
+        return path
+
+    def _record(
+        path: Path,
+        archive_path: str,
+        *,
+        kind: str = "file",
+        link_target: str | None = None,
+        payload: Path | None = None,
+        mode: int | None = None,
+        mtime_ns: int | None = None,
+    ) -> None:
+        if archive_path in used_archive_paths:
+            raise SafetyError(f"duplicate archive path: {archive_path}")
+        used_archive_paths.add(archive_path)
+        discovered.append(
+            SourceFile(
+                source=payload if payload is not None else path,
+                archive_path=archive_path,
+                kind=kind,
+                link_target=link_target,
+                mode=mode,
+                mtime_ns=mtime_ns,
+            )
+        )
 
     for raw_input in inputs:
         raw_path = Path(raw_input).expanduser()
         if raw_path.is_symlink():
             raise SafetyError(f"symlink input is not allowed: {raw_path}")
-        source = ensure_safe_input(raw_path)
+        source = ensure_safe_input(raw_path, allow_system=allow_system)
         if not source.exists():
             raise FileNotFoundError(source)
         if source.is_file():
-            candidates = [(source, source.name)]
-        elif source.is_dir():
-            root_name = source.name or "root"
-            candidates = []
-            for child in sorted(source.rglob("*")):
-                archive_path = (
-                    Path(root_name) / child.relative_to(source)
-                ).as_posix()
-                if child.is_symlink():
+            source_stat = source.stat()
+            _record(
+                source,
+                source.name,
+                mode=stat.S_IMODE(source_stat.st_mode) if metadata else None,
+                mtime_ns=source_stat.st_mtime_ns if metadata else None,
+            )
+            continue
+        if not source.is_dir():
+            raise SafetyError(f"unsupported input path: {source}")
+
+        root_name = source.name or "root"
+        if metadata:
+            # The input directory itself is an entry. Without it the root's own
+            # permissions and timestamp are lost (a private 0700 directory came
+            # back as 0755), and a tree whose top level holds nothing but
+            # symlinks could not be restored at all - no entry would ever create
+            # the destination directory.
+            root_stat = source.stat()
+            _record(
+                source,
+                root_name,
+                kind="dir",
+                payload=_payload(b""),
+                mode=stat.S_IMODE(root_stat.st_mode),
+                mtime_ns=root_stat.st_mtime_ns,
+            )
+        for child in sorted(source.rglob("*")):
+            archive_path = (
+                Path(root_name) / child.relative_to(source)
+            ).as_posix()
+            if any(
+                archive_path.startswith(prefix) for prefix in protected_prefixes
+            ):
+                # Already reported with the protected parent directory.
+                continue
+            protected = protected_name_reason(child)
+            if protected is not None:
+                # One report for the whole protected subtree: naming every child
+                # of ``node_modules`` would drown the real signal.
+                skipped.append({"path": archive_path, "reason": protected})
+                protected_prefixes.append(archive_path + "/")
+                continue
+            try:
+                child_stat = child.lstat()
+            except OSError:
+                skipped.append({"path": archive_path, "reason": "vanished"})
+                continue
+            mode = stat.S_IMODE(child_stat.st_mode) if metadata else None
+            mtime_ns = child_stat.st_mtime_ns if metadata else None
+
+            if child.is_symlink():
+                # Never resolved: the point is to store the link, not its target.
+                if not metadata:
                     skipped.append({"path": archive_path, "reason": "symlink"})
                     continue
-                if not child.is_file():
-                    continue
-                if not _is_within(source, child):
-                    raise SafetyError(
-                        f"input path escapes source directory: {child}"
-                    )
-                reason = _skip_reason(child)
+                link_target = os.readlink(child)
+                reason = _link_target_reason(link_target)
                 if reason is not None:
                     skipped.append({"path": archive_path, "reason": reason})
                     continue
-                candidates.append((child, archive_path))
-        else:
-            raise SafetyError(f"unsupported input path: {source}")
+                _record(
+                    child,
+                    archive_path,
+                    kind="symlink",
+                    link_target=link_target,
+                    payload=_payload(
+                        link_target.encode("utf-8", "surrogateescape")
+                    ),
+                    mode=mode,
+                    mtime_ns=mtime_ns,
+                )
+                continue
 
-        for child, archive_path in candidates:
-            ensure_safe_input(child)
-            if archive_path in used_archive_paths:
-                raise SafetyError(f"duplicate archive path: {archive_path}")
-            used_archive_paths.add(archive_path)
-            discovered.append(SourceFile(child, archive_path))
+            if not _is_within(source, child):
+                raise SafetyError(
+                    f"input path escapes source directory: {child}"
+                )
+            if child.is_dir():
+                if not metadata:
+                    continue
+                _record(
+                    child,
+                    archive_path,
+                    kind="dir",
+                    payload=_payload(b""),
+                    mode=mode,
+                    mtime_ns=mtime_ns,
+                )
+                continue
+            if not child.is_file():
+                skipped.append({"path": archive_path, "reason": "special"})
+                continue
+            reason = _skip_reason(child, allow_system=allow_system)
+            if reason is not None:
+                skipped.append({"path": archive_path, "reason": reason})
+                continue
+            _record(child, archive_path, mode=mode, mtime_ns=mtime_ns)
 
     if not discovered:
         raise SafetyError("no files found to pack")
     return discovered, skipped
+
 
 
 def _codec_warnings(wanted_zstd: bool) -> list[str]:
@@ -187,8 +331,15 @@ def _spool_source(
     raw_path: Path,
     *,
     searchable: bool,
-) -> tuple[int, str, dict | None]:
-    """Copy a source into a temp file while hashing and indexing by chunks."""
+    accept_changing: bool = False,
+) -> tuple[int, str, dict | None, bool]:
+    """Copy a source into a temp file while hashing and indexing by chunks.
+
+    Returns the size, the digest, the text index document and whether the file
+    changed while it was read. ``accept_changing=False`` (the default) turns such
+    a file into a :class:`SourceChangedError` so the caller can skip it; ``True``
+    keeps the bytes that were actually read.
+    """
 
     try:
         before = source.stat()
@@ -211,13 +362,14 @@ def _spool_source(
         after = source.stat()
     except OSError as exc:
         raise FormatError(f"cannot stat source after packing: {source}") from exc
-    if (
+    changed = (
         before.st_size != after.st_size
         or before.st_mtime_ns != after.st_mtime_ns
-    ):
-        raise SafetyError(f"source changed while packing: {source}")
+    )
+    if changed and not accept_changing:
+        raise SourceChangedError(f"source changed while packing: {source}")
     if collector is None:
-        return raw_size, digest.hexdigest(), None
+        return raw_size, digest.hexdigest(), None, changed
     collector.finish()
     return (
         raw_size,
@@ -226,6 +378,7 @@ def _spool_source(
             "excerpt": collector.excerpt,
             "terms": collector.terms,
         },
+        changed,
     )
 
 
@@ -329,10 +482,11 @@ def _stream_estimate(
 ) -> tuple[int, int, str]:
     raw_path = staging_dir / f"estimate-{position}.raw"
     try:
-        raw_size, _digest, _document = _spool_source(
+        raw_size, _digest, _document, _changed = _spool_source(
             source_file.source,
             raw_path,
             searchable=False,
+            accept_changing=True,
         )
         payload_path, codec = _select_streaming_payload(
             raw_path,
@@ -346,7 +500,12 @@ def _stream_estimate(
             candidate.unlink(missing_ok=True)
 
 
-def _spool_worker(source: str, raw_path: str, searchable: bool) -> dict:
+def _spool_worker(
+    source: str,
+    raw_path: str,
+    searchable: bool,
+    accept_changing: bool = False,
+) -> dict:
     """Phase A worker: spool one source file into staging.
 
     Top-level and picklable; arguments are plain strings/bools so a process pool
@@ -356,18 +515,22 @@ def _spool_worker(source: str, raw_path: str, searchable: bool) -> dict:
     """
 
     try:
-        raw_size, digest, text_info = _spool_source(
+        raw_size, digest, text_info, changed = _spool_source(
             Path(source),
             Path(raw_path),
             searchable=searchable,
+            accept_changing=accept_changing,
         )
     except FileNotFoundError:
         return {"status": "vanished"}
+    except SourceChangedError:
+        return {"status": "changed"}
     return {
         "status": "ok",
         "raw_size": raw_size,
         "digest": digest,
         "text_info": text_info,
+        "changed": changed,
     }
 
 
@@ -491,8 +654,28 @@ def _run_ordered_pool(worker, arguments: list, workers: int) -> tuple[list, str 
     return results, None
 
 
-def analyze(inputs: Iterable[str | Path]) -> dict:
-    files, skipped = _discover_files(inputs)
+def analyze(
+    inputs: Iterable[str | Path],
+    *,
+    metadata: bool = True,
+    allow_system: bool = False,
+) -> dict:
+    with tempfile.TemporaryDirectory(prefix="cloudarc-analyze-meta-") as meta_temp:
+        files, skipped = _discover_files(
+            inputs,
+            meta_dir=Path(meta_temp),
+            metadata=metadata,
+            allow_system=allow_system,
+        )
+        return _analyze_files(files, skipped, metadata=metadata)
+
+
+def _analyze_files(
+    files: list[SourceFile],
+    skipped: list[dict],
+    *,
+    metadata: bool = True,
+) -> dict:
     vanished: list[dict] = []
     rows: list[dict] = []
     raw_total = 0
@@ -519,12 +702,15 @@ def analyze(inputs: Iterable[str | Path]) -> dict:
             rows.append(
                 {
                     "path": source_file.archive_path,
+                    "kind": source_file.kind,
                     "raw_bytes": raw_size,
                     "requested_method": hint.requested_method,
                     "estimated_codec": codec,
                     "estimated_packed_bytes": packed_size,
                     "estimated_saved_bytes": raw_size - packed_size,
-                    "searchable": hint.searchable,
+                    "searchable": bool(
+                        hint.searchable and source_file.kind == "file"
+                    ),
                     "reason": hint.reason,
                 }
             )
@@ -533,6 +719,7 @@ def analyze(inputs: Iterable[str | Path]) -> dict:
     skipped = skipped + vanished
     return {
         "files": rows,
+        "metadata": metadata,
         "raw_bytes": raw_total,
         "estimated_packed_bytes": packed_total,
         "estimated_saved_bytes": saved,
@@ -609,6 +796,9 @@ def pack(
     stats_context: dict | None = None,
     max_package_bytes: int | None = None,
     workers: int | None = None,
+    metadata: bool = True,
+    allow_system: bool = False,
+    accept_changing: bool = False,
 ) -> dict:
     input_values = list(inputs)
     search_index = bool(index)
@@ -616,14 +806,32 @@ def pack(
     if output_input.is_symlink():
         raise SafetyError(f"symlink output is not allowed: {output_input}")
     output_path = output_input.resolve()
-    ensure_safe_input(output_path.parent)
-    _validate_pack_output(input_values, output_path)
-    files, skipped = _discover_files(input_values)
+    ensure_safe_input(output_path.parent, allow_system=allow_system)
+    _validate_pack_output(
+        input_values, output_path, allow_system=allow_system
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(
+        tempfile.mkdtemp(prefix=".cloudarc-pack-", dir=output_path.parent)
+    )
+    staged_archive = staging_dir / output_path.name
+    try:
+        files, skipped = _discover_files(
+            input_values,
+            meta_dir=staging_dir / "meta",
+            metadata=metadata,
+            allow_system=allow_system,
+        )
+    except BaseException:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
     worker_budget = _resolve_workers(workers, files)
     skipped_summary = _skipped_summary(skipped)
     raw_input_bytes = sum(item.source.stat().st_size for item in files)
     if dry_run:
-        plan = analyze(input_values)
+        plan = analyze(
+            input_values, metadata=metadata, allow_system=allow_system
+        )
         plan.update(
             {
                 "dry_run": True,
@@ -640,6 +848,9 @@ def pack(
                 f"source is {raw_input_bytes} bytes, above configured limit "
                 f"{max_package_bytes} bytes"
             )
+        # A dry run must not leave the staging directory (with its metadata
+        # payloads) behind in the output directory.
+        shutil.rmtree(staging_dir, ignore_errors=True)
         return plan
     if (
         max_package_bytes
@@ -662,11 +873,6 @@ def pack(
     pool_warnings: list[str] = []
     pool_used = False
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    staging_dir = Path(
-        tempfile.mkdtemp(prefix=".cloudarc-pack-", dir=output_path.parent)
-    )
-    staged_archive = staging_dir / output_path.name
     try:
         pool_enabled = worker_budget > 1 and _pool_capable()
 
@@ -681,9 +887,22 @@ def pack(
             hint = predict(source_file.source)
             if hint.requested_method == "zstd":
                 wanted_zstd = True
-            searchable = bool(hint.searchable and search_index)
+            # Directory markers and symlink targets are metadata, not content:
+            # they must never enter the lexical index.
+            searchable = bool(
+                hint.searchable
+                and search_index
+                and source_file.kind == "file"
+            )
             raw_path = staging_dir / f"raw-{position:08d}.bin"
-            spool_args.append((str(source_file.source), str(raw_path), searchable))
+            spool_args.append(
+                (
+                    str(source_file.source),
+                    str(raw_path),
+                    searchable,
+                    accept_changing,
+                )
+            )
             spool_meta.append(
                 {
                     "position": position,
@@ -708,7 +927,9 @@ def pack(
         records: list[dict | None] = [None] * len(files)
         for meta, outcome in zip(spool_meta, spool_results):
             if outcome["status"] != "ok":
-                status_by_position[meta["position"]] = "vanished"
+                # "vanished" (gone mid-run) or "changed" (written while read):
+                # both are reported per file instead of killing the archive.
+                status_by_position[meta["position"]] = outcome["status"]
                 continue
             status_by_position[meta["position"]] = "packed"
             records[meta["position"]] = {
@@ -716,6 +937,7 @@ def pack(
                 "raw_size": outcome["raw_size"],
                 "digest": outcome["digest"],
                 "text_info": outcome["text_info"],
+                "changed": bool(outcome.get("changed")),
             }
         raw_total = sum(
             record["raw_size"] for record in records if record is not None
@@ -723,9 +945,10 @@ def pack(
 
         # Skipped files stay in the original file order.
         for position, source_file in enumerate(files):
-            if status_by_position.get(position) == "vanished":
+            status = status_by_position.get(position)
+            if status in {"vanished", "changed"}:
                 skipped.append(
-                    {"path": source_file.archive_path, "reason": "vanished"}
+                    {"path": source_file.archive_path, "reason": status}
                 )
 
         # ---- Phase B: sequential chunk_id / dedup assignment (file order) ----
@@ -798,6 +1021,7 @@ def pack(
             entry = {
                 "entry_id": _entry_id(position),
                 "path": source_file.archive_path,
+                "kind": source_file.kind,
                 "size": record["raw_size"],
                 "sha256": record["digest"],
                 "media_type": _guess_media_type(source_file.source),
@@ -807,6 +1031,16 @@ def pack(
                 "chunk_id": chunk_id,
                 "searchable": record["searchable"],
             }
+            if record.get("changed"):
+                # Kept only with --accept-changing: the bytes are real, but they
+                # are a torn read of a file that was being written.
+                entry["changing"] = True
+            if source_file.mode is not None:
+                entry["mode"] = source_file.mode
+            if source_file.mtime_ns is not None:
+                entry["mtime_ns"] = source_file.mtime_ns
+            if source_file.link_target is not None:
+                entry["target"] = source_file.link_target
             if record["dedup_of"]:
                 entry["dedup_of"] = record["dedup_of"]
             entries.append(entry)
@@ -823,6 +1057,12 @@ def pack(
                 )
 
         warnings = list(_codec_warnings(wanted_zstd))
+        changing_count = sum(1 for record in records if record and record.get("changed"))
+        if changing_count:
+            warnings.append(
+                f"{changing_count} file(s) were still being written while packing and are "
+                "stored as a torn snapshot (marked changing: true in the manifest)"
+            )
         if pool_used and worker_budget > 1:
             warnings.append(
                 f"workers={worker_budget}: peak RSS budget grows with the pool"
@@ -873,6 +1113,7 @@ def pack(
             index,
             chunk_files,
             buffer_size=STREAM_BUFFER_SIZE,
+            format_version=_archive_format_version(entries),
         )
         staged_manifest, staged_index = write_sidecars(
             staged_archive,
@@ -891,6 +1132,13 @@ def pack(
 
     packed_bytes = committed_archive.stat().st_size
     saved_bytes = raw_total - packed_bytes
+    if saved_bytes < 0:
+        warnings.append(
+            f"archive is {abs(saved_bytes) / max(raw_total, 1) * 100:.1f}% LARGER than the input "
+            f"({packed_bytes} vs {raw_total} bytes): the manifest and search index cost more "
+            "than the codec saved. Retry with --no-index, or accept a bigger but "
+            "checksum-verified archive."
+        )
     result = {
         "archive": str(committed_archive),
         "manifest": str(manifest_path),
@@ -904,6 +1152,10 @@ def pack(
         "methods": methods,
         "header": header,
         "dedup": dedup,
+        "metadata": metadata,
+        "accept_changing": accept_changing,
+        "changing_count": changing_count,
+        "kinds": _kind_counts(entries),
         "index_built": search_index,
         "skipped": skipped,
         "skipped_count": skipped_summary["count"],
@@ -936,6 +1188,31 @@ def pack(
             }
         )
     return result
+
+
+def _archive_format_version(entries: list[dict]) -> int:
+    """Version 2 only when a 1.x reader could not restore the archive correctly.
+
+    Directory markers and symlink entries are meaningless to a 1.x reader (it
+    would write an empty file and a text file containing the link target), so
+    such archives declare version 2 and old engines refuse them. An archive of
+    plain files - even one carrying modes and mtimes - stays version 1.
+    """
+
+    for entry in entries:
+        if entry.get("kind", "file") != "file":
+            return METADATA_FORMAT_VERSION
+    return FORMAT_VERSION
+
+
+def _kind_counts(entries: list[dict]) -> dict:
+    """Count entries by kind for CLI output and diagnostics."""
+
+    counts = {"file": 0, "symlink": 0, "dir": 0}
+    for entry in entries:
+        kind = entry.get("kind", "file")
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
 
 
 def _guess_media_type(path: Path) -> str:
@@ -1081,12 +1358,92 @@ def search_archive(
     )["results"]
 
 
+def _apply_entry_metadata(
+    path: Path,
+    entry: dict,
+    *,
+    restore_metadata: bool,
+    warnings: list[str],
+    apply_mode: bool = True,
+) -> None:
+    """Restore the permission bits and modification time recorded by ``pack``.
+
+    ``apply_mode=False`` is used for symlinks: Linux has no ``lchmod``, so the
+    mode of a link is not a thing that can be (or needs to be) restored.
+    """
+
+    if not restore_metadata:
+        return
+    mode = entry.get("mode")
+    if apply_mode and isinstance(mode, int) and not isinstance(mode, bool):
+        try:
+            os.chmod(path, mode, follow_symlinks=False)
+        except (OSError, ValueError, NotImplementedError) as exc:
+            warnings.append(f"could not restore mode for {entry['path']}: {exc}")
+    mtime_ns = entry.get("mtime_ns")
+    if isinstance(mtime_ns, int) and not isinstance(mtime_ns, bool):
+        try:
+            os.utime(path, ns=(mtime_ns, mtime_ns), follow_symlinks=False)
+        except (OSError, ValueError, OverflowError, NotImplementedError) as exc:
+            # OverflowError: a hostile archive can carry mtime_ns=10**40, which
+            # validate_manifest accepts (it only demands a non-negative integer)
+            # but os.utime cannot apply. Warn instead of tearing the restore down.
+            warnings.append(f"could not restore mtime for {entry['path']}: {exc}")
+
+
+def _restore_symlink(
+    target: Path,
+    entry: dict,
+    staging: Path,
+    *,
+    restore_metadata: bool,
+    warnings: list[str],
+) -> None:
+    """Recreate a stored symlink without ever following it.
+
+    Links are created *after* every regular file, so no later entry can write
+    through a link and escape the output tree (the classic tar/zip symlink
+    escape). The link is created only when it stays inside the staging tree.
+    """
+
+    link_target = entry.get("target")
+    if not isinstance(link_target, str) or not link_target or "\x00" in link_target:
+        raise FormatError(f"symlink entry has an unusable target: {entry['path']}")
+    parent = ensure_within(staging, target.parent)
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise SafetyError(
+            f"cannot create the parent directory for {entry['path']}: {exc}"
+        ) from exc
+    if not _is_within(staging, parent.resolve()):
+        raise SafetyError(
+            f"refusing to create a symlink outside the output: {entry['path']}"
+        )
+    if target.is_symlink():
+        target.unlink()
+    elif target.exists():
+        raise SafetyError(
+            f"symlink entry collides with an existing path: {entry['path']}"
+        )
+    os.symlink(link_target, target)
+    _apply_entry_metadata(
+        target,
+        entry,
+        restore_metadata=restore_metadata,
+        warnings=warnings,
+        apply_mode=False,
+    )
+
+
 def unpack(
     archive: str | Path,
     output_dir: str | Path,
     *,
     dry_run: bool = False,
     apply: bool = False,
+    restore_metadata: bool = True,
+    allow_system: bool = False,
 ) -> dict:
     archive_input = Path(archive).expanduser()
     if archive_input.is_symlink():
@@ -1100,7 +1457,7 @@ def unpack(
         raise SafetyError(
             "unpack output must not contain or replace the source archive"
         )
-    ensure_safe_input(output_path.parent)
+    ensure_safe_input(output_path.parent, allow_system=allow_system)
     manifest = read_manifest(archive_path)
     index = read_index(archive_path)
     validate_manifest_index_alignment(manifest, index)
@@ -1127,10 +1484,29 @@ def unpack(
         tempfile.mkdtemp(prefix=".cloudarc-unpack-", dir=output_parent)
     )
     backup: Path | None = None
+    entries = manifest["entries"]
+    metadata_warnings: list[str] = []
     try:
-        for entry in manifest["entries"]:
+        directories: list[tuple[Path, dict]] = []
+        links: list[tuple[Path, dict]] = []
+
+        # Pass 1: directories and regular files only. No symlink exists yet, so a
+        # stored link cannot redirect a write outside the staging directory.
+        for entry in entries:
             target = ensure_within(staging, staging / entry["path"])
+            kind = entry.get("kind", "file")
+            if kind == "dir":
+                target.mkdir(parents=True, exist_ok=True)
+                directories.append((target, entry))
+                continue
+            if kind == "symlink":
+                links.append((target, entry))
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
+            if not _is_within(staging, target.parent.resolve()):
+                raise SafetyError(
+                    f"refusing to write outside the output: {entry['path']}"
+                )
             with target.open("wb") as target_obj:
                 stream_entry_to_file(
                     archive_path,
@@ -1138,6 +1514,32 @@ def unpack(
                     target_obj,
                     buffer_size=STREAM_BUFFER_SIZE,
                 )
+            _apply_entry_metadata(
+                target,
+                entry,
+                restore_metadata=restore_metadata,
+                warnings=metadata_warnings,
+            )
+
+        # Pass 2: the links, then directory permissions (after their children
+        # exist, deepest directory first).
+        for target, entry in links:
+            _restore_symlink(
+                target,
+                entry,
+                staging,
+                restore_metadata=restore_metadata,
+                warnings=metadata_warnings,
+            )
+        for target, entry in sorted(
+            directories, key=lambda item: len(item[0].parts), reverse=True
+        ):
+            _apply_entry_metadata(
+                target,
+                entry,
+                restore_metadata=restore_metadata,
+                warnings=metadata_warnings,
+            )
 
         if output_path.exists():
             backup = backup_existing(output_path)
@@ -1158,5 +1560,7 @@ def unpack(
     return {
         "archive": str(archive_path),
         "output": str(output_path),
-        "restored": len(manifest["entries"]),
+        "restored": len(entries),
+        "restore_metadata": restore_metadata,
+        "metadata_warnings": metadata_warnings,
     }

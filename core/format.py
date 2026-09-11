@@ -42,6 +42,15 @@ MAGIC = b"VIBO\n"
 HEADER_SIZE = 8192
 FORMAT_NAME = "cloudarc"
 FORMAT_VERSION = 1
+# Archive version 1 stores file contents only. Version 2 declares that the
+# manifest carries entry metadata (kind, mode, mtime_ns, symlink targets) which a
+# 1.x reader cannot honour - it would restore a directory as an empty file and a
+# symlink as a small text file. Such readers check this number and refuse the
+# archive, so a 1.4.0 archive fails loudly on an old engine instead of restoring
+# something wrong. Archives whose entries are all plain files stay version 1 and
+# remain readable by 1.3.x.
+METADATA_FORMAT_VERSION = 2
+SUPPORTED_FORMAT_VERSIONS = {FORMAT_VERSION, METADATA_FORMAT_VERSION}
 
 
 def _header_block(header: dict) -> bytes:
@@ -58,8 +67,12 @@ def _validate_header(header: dict, *, file_size: int | None = None) -> None:
         raise FormatError("VIBO header must be an object")
     if header.get("container") != FORMAT_NAME:
         raise FormatError("unsupported VIBO container")
-    if header.get("format_version") != FORMAT_VERSION:
-        raise FormatError("unsupported VIBO format version")
+    if header.get("format_version") not in SUPPORTED_FORMAT_VERSIONS:
+        raise FormatError(
+            "unsupported VIBO format version "
+            f"{header.get('format_version')!r}: this build reads "
+            f"{sorted(SUPPORTED_FORMAT_VERSIONS)}"
+        )
     if not isinstance(header.get("archive_id"), str) or not header["archive_id"]:
         raise FormatError("VIBO header archive_id is missing")
     if header.get("header_offset") != len(MAGIC):
@@ -521,6 +534,8 @@ def write_archive(
     manifest: dict,
     index: dict,
     chunks: dict[str, bytes],
+    *,
+    format_version: int = FORMAT_VERSION,
 ) -> dict:
     """Write a CloudArc archive and atomically publish it."""
 
@@ -555,7 +570,7 @@ def write_archive(
 
     header = {
         "container": FORMAT_NAME,
-        "format_version": FORMAT_VERSION,
+        "format_version": format_version,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "archive_id": manifest["archive_id"],
         "header_offset": len(MAGIC),
@@ -607,11 +622,13 @@ def write_archive_streaming(
     chunk_files: dict[str, Path],
     *,
     buffer_size: int = 1024 * 1024,
+    format_version: int = FORMAT_VERSION,
 ) -> dict:
     """Write an archive by copying chunk files with bounded memory.
 
-    ``chunk_files`` contains already-compressed payloads. The binary layout
-    remains format version 1; only the publication path is streaming.
+    ``chunk_files`` contains already-compressed payloads. The binary layout is
+    unchanged; only the publication path is streaming. ``format_version`` is 2
+    when the manifest carries entry metadata a 1.x reader cannot honour.
     """
 
     if isinstance(buffer_size, bool) or not isinstance(buffer_size, int):
@@ -656,7 +673,7 @@ def write_archive_streaming(
 
     header = {
         "container": FORMAT_NAME,
-        "format_version": FORMAT_VERSION,
+        "format_version": format_version,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "archive_id": manifest["archive_id"],
         "header_offset": len(MAGIC),

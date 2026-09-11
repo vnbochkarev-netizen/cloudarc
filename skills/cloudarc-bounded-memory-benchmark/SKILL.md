@@ -1,23 +1,23 @@
 ---
 name: cloudarc-bounded-memory-benchmark
-version: 1.3.0
+version: 1.4.0
 description: Repeatable CloudArc workflow for validating bounded-memory streaming pack/unpack, high-cardinality multi-file .vibo packages, deduplication, remote-search range telemetry, and CI/manual benchmark gates. Use when changing benchmarks, SLOs, manifest/index cardinality, remote metadata reads, GitHub Actions checks, or when reviewing a large-package MVP before cloud-provider integration.
 tools: [python]
 license: MIT-0
 metadata:
   hermes:
     tags: [benchmark, compression, memory, cloudarc, ci]
-    version: 1.3.0
+    version: 1.4.0
 ---
 
 # CloudArc Bounded-Memory Benchmark
 
-> main: run `python3 scripts/cloudarc_benchmark.py`
+> main: run `scripts/cloudarc_benchmark.py` (from the skill directory; subcommands: `doctor`, `selfcheck`, `smoke`, `manual`, `check-telemetry`, `badge`; without a subcommand it prints usage and exits 2)
 
-**Release:** `1.3.0` (2026-09-11)
+**Release:** `1.4.0` (2026-09-11)
 
 Use this skill to make large-package performance work reproducible, measurable,
-and safe to run before real cloud providers are enabled. Keep the portable
+and safe to run once a real cloud provider (Yandex Disk via an OAuth token) is enabled. Keep the portable
 reference backend authoritative; native ViBo semantic support remains optional.
 
 ## Workflow
@@ -164,8 +164,10 @@ python -B skills/cloudarc-bounded-memory-benchmark/scripts/cloudarc_benchmark.py
 temporary disk. `check-telemetry` accepts a response object containing
 `telemetry` or a telemetry object directly, and returns non-zero on invariant
 violations. Both benchmark commands also verify that JSON reports a passing
-evaluation, that multi-file manifest/index counts match the requested file
-count, and that the paired Markdown report exists and contains `PASS`.
+evaluation, that the multi-file manifest covers every file (one entry per file
+plus, since 1.4.0, one per directory - the check uses the reported `kinds`) while
+the search index holds exactly the files, and that the paired Markdown report
+exists and contains `PASS`.
 
 ### 6. Update contracts and verify
 
@@ -210,10 +212,20 @@ skill to another team or upgrading from an earlier package.
 
 ## Skipped files and the index flag
 
-`pack`/`analyze` now return `skipped`, `skipped_count` and `skipped_by_reason`
-(`protected` / `system` / `symlink`) and the CLI warns on stderr. Never treat a
-pack as complete without checking that count: protected subtrees (`.git`,
-`__pycache__`, `.venv`) and symlinks inside a directory are skipped by design.
+`pack` returns `skipped`, `skipped_count` and `skipped_by_reason`, and `analyze`
+returns `skipped` plus `skipped_summary: {count, by_reason}` (reasons:
+`protected` / `system` / `special` / `symlink-target` / `changed` / `vanished`);
+the CLI warns on stderr. Never treat a pack as complete without checking that count: protected
+subtrees (`.git`, `__pycache__`, `.venv`), leading system paths (without
+`--allow-system`) and special files are skipped by design.
+
+Since 1.4.0 a symlink inside a tree is no longer skipped: it is stored as a
+`symlink` entry (the target string is the payload) and recreated on unpack, and
+every entry carries `mode` and `mtime_ns` so a restore rebuilds permissions,
+timestamps, empty directories and links. Check the result from the repository
+root with `python3 scripts/verify_restore.py <archive.vibo> <original-root>
+<restored-root>`: it compares kind, content hash, mode and mtime per entry,
+prints `verdict: OK` and exits 0, or exits 1 with the list of mismatches.
 
 `pack --no-index` (also on `push`) skips lexical index construction for
 memory-bounded runs on text-heavy trees; the manifest records

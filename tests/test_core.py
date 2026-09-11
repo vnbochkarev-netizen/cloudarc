@@ -44,9 +44,11 @@ class CoreArchiveTests(unittest.TestCase):
 
             result = pack([source], archive, dedup=True)
             self.assertTrue(archive.exists())
-            self.assertEqual(result["entry_count"], 2)
-            self.assertEqual(read_header(archive)["format_version"], 1)
-            self.assertEqual(len(read_manifest(archive)["entries"]), 2)
+            # 1.4.0 entries: the input directory itself (so its mode and
+            # timestamp survive a restore) plus the two files inside it.
+            self.assertEqual(result["entry_count"], 3)
+            self.assertEqual(read_header(archive)["format_version"], 2)
+            self.assertEqual(len(read_manifest(archive)["entries"]), 3)
             self.assertEqual(read_index(archive)["schema"], "cloudarc.index")
 
             manifest_sidecar, index_sidecar = sidecar_paths(archive)

@@ -22,6 +22,10 @@ ALLOWED_CODECS = {"store", "deflate", "zstd"}
 HEX_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
+ALLOWED_ENTRY_KINDS = {"file", "symlink", "dir"}
+MAX_LINK_TARGET_BYTES = 4096
+
+
 def canonical_json_bytes(value: dict) -> bytes:
     return json.dumps(
         value,
@@ -182,6 +186,7 @@ def validate_manifest(
         raise FormatError("manifest entries must be a list")
     seen_paths: set[str] = set()
     seen_ids: set[str] = set()
+    symlink_paths: list[str] = []
     for entry in entries:
         if not isinstance(entry, dict):
             raise FormatError("manifest entry must be an object")
@@ -196,6 +201,28 @@ def validate_manifest(
         if entry_id in seen_ids:
             raise FormatError(f"duplicate entry_id: {entry_id}")
         seen_ids.add(entry_id)
+
+        kind = entry.get("kind", "file")
+        if not isinstance(kind, str) or kind not in ALLOWED_ENTRY_KINDS:
+            raise FormatError(f"invalid entry kind: {path}")
+        mode = entry.get("mode")
+        if mode is not None and (
+            isinstance(mode, bool)
+            or not isinstance(mode, int)
+            or mode < 0
+            or mode > 0o7777
+        ):
+            raise FormatError(f"invalid mode for manifest entry: {path}")
+        if "mtime_ns" in entry and not _is_nonnegative_int(entry["mtime_ns"]):
+            raise FormatError(f"invalid mtime_ns for manifest entry: {path}")
+        if kind == "symlink":
+            target = entry.get("target")
+            if not isinstance(target, str) or not target or "\x00" in target:
+                raise FormatError(f"symlink entry needs a target: {path}")
+            if len(target.encode("utf-8", "surrogateescape")) > MAX_LINK_TARGET_BYTES:
+                raise FormatError(f"symlink target is too long: {path}")
+        elif "target" in entry:
+            raise FormatError(f"only symlink entries may declare a target: {path}")
 
         for field in (
             "sha256",
@@ -220,12 +247,27 @@ def validate_manifest(
             raise FormatError(f"unsupported codec for manifest entry: {path}")
         if "searchable" in entry and not isinstance(entry["searchable"], bool):
             raise FormatError(f"invalid searchable flag for manifest entry: {path}")
+        if "changing" in entry and not isinstance(entry["changing"], bool):
+            raise FormatError(f"invalid changing flag for manifest entry: {path}")
+        if kind == "symlink":
+            symlink_paths.append(path)
 
         if data_length is not None:
             end = entry["chunk_offset"] + entry["chunk_length"]
             if end > data_length:
                 raise FormatError(
                     f"manifest chunk is outside data section: {path}"
+                )
+
+    # "Create a link, then write through it" is the classic archive escape:
+    # an archive that declares a symlink and then stores entries *below* that
+    # link is refused before a single byte is written.
+    for symlink_path in symlink_paths:
+        prefix = f"{symlink_path}/"
+        for other in seen_paths:
+            if other.startswith(prefix):
+                raise FormatError(
+                    f"archive writes through a symlink: {symlink_path}"
                 )
 
     if "entry_count" in manifest:
