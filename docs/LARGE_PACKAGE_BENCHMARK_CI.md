@@ -1,6 +1,6 @@
 # CloudArc Large-Package Benchmark
 
-**Generated:** 2026-09-11T04:48:42.492306+00:00  
+**Generated:** 2026-09-10T18:12:26.815242+00:00  
 **Run status:** `complete`  
 **Profile:** `compressible-text`  
 **Workload:** v2 / `59ac9b284e1c4a7c`  
@@ -26,8 +26,8 @@
 
 | Size GiB | Operation | Seconds | MiB/s | Peak RSS MiB | RSS delta MiB | Temp GiB | Temp/input | SLO |
 |---:|---|---:|---:|---:|---:|---:|---:|---|
-| 0.062 | pack | 2.933 | 21.8 | 27.1 | 3.1 | 0.063 | 1.002 | PASS |
-| 0.062 | unpack | 0.319 | 200.5 | 26.9 | 3.3 | 0.062 | 1.000 | PASS |
+| 0.062 | pack | 2.881 | 22.2 | 27.0 | 3.0 | 0.063 | 1.002 | PASS |
+| 0.062 | unpack | 0.331 | 193.1 | 26.9 | 3.2 | 0.062 | 1.000 | PASS |
 
 ## Scaling Evaluation
 
