@@ -1,11 +1,20 @@
 ---
 name: cloudarc-bounded-memory-benchmark
+version: 1.3.0
 description: Repeatable CloudArc workflow for validating bounded-memory streaming pack/unpack, high-cardinality multi-file .vibo packages, deduplication, remote-search range telemetry, and CI/manual benchmark gates. Use when changing benchmarks, SLOs, manifest/index cardinality, remote metadata reads, GitHub Actions checks, or when reviewing a large-package MVP before cloud-provider integration.
+tools: [python]
+license: MIT-0
+metadata:
+  hermes:
+    tags: [benchmark, compression, memory, cloudarc, ci]
+    version: 1.3.0
 ---
 
 # CloudArc Bounded-Memory Benchmark
 
-**Release:** `1.1.0` (2026-09-10)
+> main: run `python3 scripts/cloudarc_benchmark.py`
+
+**Release:** `1.3.0` (2026-09-11)
 
 Use this skill to make large-package performance work reproducible, measurable,
 and safe to run before real cloud providers are enabled. Keep the portable
@@ -199,7 +208,7 @@ reviewing the detailed SLO, telemetry, resume, and CI contracts. Read
 [references/release-notes.md](references/release-notes.md) when handing the
 skill to another team or upgrading from an earlier package.
 
-## Skipped files and the index flag (1.2.1)
+## Skipped files and the index flag
 
 `pack`/`analyze` now return `skipped`, `skipped_count` and `skipped_by_reason`
 (`protected` / `system` / `symlink`) and the CLI warns on stderr. Never treat a
