@@ -165,7 +165,7 @@ temporary disk. `check-telemetry` accepts a response object containing
 `telemetry` or a telemetry object directly, and returns non-zero on invariant
 violations. Both benchmark commands also verify that JSON reports a passing
 evaluation, that the multi-file manifest covers every file (one entry per file
-plus, since 1.4.0, one per directory - the check uses the reported `kinds`) while
+plus one entry per directory - the check uses the reported `kinds`) while
 the search index holds exactly the files, and that the paired Markdown report
 exists and contains `PASS`.
 
@@ -219,10 +219,10 @@ the CLI warns on stderr. Never treat a pack as complete without checking that co
 subtrees (`.git`, `__pycache__`, `.venv`), leading system paths (without
 `--allow-system`) and special files are skipped by design.
 
-Since 1.4.0 a symlink inside a tree is no longer skipped: it is stored as a
-`symlink` entry (the target string is the payload) and recreated on unpack, and
-every entry carries `mode` and `mtime_ns` so a restore rebuilds permissions,
-timestamps, empty directories and links. Check the result from the repository
+A symlink inside a tree is stored as a `symlink` entry (the target string is the
+payload) and recreated on unpack, and every entry carries `mode` and `mtime_ns`,
+so a restore rebuilds permissions, timestamps, empty directories and links.
+Version history lives in `references/release-notes.md`. Check the result from the repository
 root with `python3 scripts/verify_restore.py <archive.vibo> <original-root>
 <restored-root>`: it compares kind, content hash, mode and mtime per entry,
 prints `verdict: OK` and exits 0, or exits 1 with the list of mismatches.
