@@ -1,6 +1,20 @@
-# CloudArc Bounded-Memory Benchmark 1.2.3
+# CloudArc Bounded-Memory Benchmark 1.3.0
 
 **Release date:** 2026-09-11
+
+## Highlights (1.3.0)
+
+- zstd for text (optional package, baked into binary builds): the CI text profile
+  archive drops 114973 -> 18461 KiB (6.2x), pack 22.2 -> 26.6 MiB/s. A missing
+  zstandard is reported as a warning instead of a silent deflate fallback.
+- Process-pool packing by file (`--workers N`), chosen by measurement: used only
+  above 16 MiB total and >= 2 files (2.33x at 16.4 MiB, 3.55x at 4x32 MiB,
+  3.69x at 8x24 MiB); below that sequential wins (0.76x on 50 tiny files).
+  Peak tree RSS with the pool 45 -> 155 MiB (inside the 256 MiB SLO), warned
+  when used, fail-safe fallback if the pool cannot start.
+- Files vanishing mid-run are reported as `skipped: vanished`.
+- Adaptive buffer measured and rejected (8 MiB is slower than 1 MiB).
+- Product suite: 76 -> 83 tests.
 
 ## Highlights (1.2.3)
 

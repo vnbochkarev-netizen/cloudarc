@@ -18,6 +18,14 @@ The benchmark is deliberately separate from the regular unit-test suite. The
 suite uses small smoke payloads; this document governs the large-package
 acceptance run.
 
+**Process-pool mode is outside this single-file SLO.** `pack --workers N` (and
+the automatic choice above 16 MiB total) runs several pack processes: the
+256 MiB limit still applies per worker, while the *sum* over the process tree
+grows. Measured on 4 CPUs (1.3.0): 4 x 32 MiB -> peak tree RSS 155 MiB;
+4000 x 16 KiB -> 117 MiB; at most 4 workers are ever started, and a warning is
+emitted whenever the pool is used. A single huge file is never parallelised
+(one chunk), so the classic 1/5/10 GiB profile above stays sequential.
+
 ## Limits
 
 | Measurement | Pack | Unpack |
