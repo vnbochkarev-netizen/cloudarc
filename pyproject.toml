@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibo-cloudarc"
-version = "1.2.2"
+version = "1.2.3"
 description = "Safe CloudArc CLI with a portable VIBO container reference backend"
 requires-python = ">=3.11"
 dependencies = []

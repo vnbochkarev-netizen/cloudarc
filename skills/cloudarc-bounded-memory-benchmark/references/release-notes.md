@@ -1,6 +1,14 @@
-# CloudArc Bounded-Memory Benchmark 1.2.2
+# CloudArc Bounded-Memory Benchmark 1.2.3
 
 **Release date:** 2026-09-11
+
+## Highlights (1.2.3)
+
+- Files that vanish mid-run (SQLite `-shm`/`-wal` siblings, rotating logs) are now
+  reported as `skipped: vanished` instead of aborting the archive. Found by
+  backing up a live 2.2 GB data set: the pack died on `/root/.hermes/kanban.db-shm`.
+- Skipped reasons: `protected`, `system`, `symlink`, `vanished`.
+- Product suite: 76 -> 78 tests.
 
 ## Highlights (1.2.2)
 

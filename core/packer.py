@@ -321,6 +321,7 @@ def _stream_estimate(
 
 def analyze(inputs: Iterable[str | Path]) -> dict:
     files, skipped = _discover_files(inputs)
+    vanished: list[dict] = []
     rows: list[dict] = []
     raw_total = 0
     packed_total = 0
@@ -328,12 +329,19 @@ def analyze(inputs: Iterable[str | Path]) -> dict:
         staging_dir = Path(temp_dir)
         for position, source_file in enumerate(files):
             hint = predict(source_file.source)
-            raw_size, packed_size, codec = _stream_estimate(
-                source_file,
-                hint,
-                staging_dir,
-                position,
-            )
+            try:
+                raw_size, packed_size, codec = _stream_estimate(
+                    source_file,
+                    hint,
+                    staging_dir,
+                    position,
+                )
+            except FileNotFoundError:
+                # A file can disappear between the walk and the read: SQLite
+                # removes its -shm/-wal siblings, logs rotate, editors swap
+                # files. Report it instead of failing the whole archive.
+                vanished.append({"path": source_file.archive_path, "reason": "vanished"})
+                continue
             raw_total += raw_size
             packed_total += packed_size
             rows.append(
@@ -350,6 +358,7 @@ def analyze(inputs: Iterable[str | Path]) -> dict:
             )
 
     saved = raw_total - packed_total
+    skipped = skipped + vanished
     return {
         "files": rows,
         "raw_bytes": raw_total,
@@ -484,14 +493,27 @@ def pack(
     staged_archive = staging_dir / output_path.name
     try:
         for position, source_file in enumerate(files):
+            if not source_file.source.exists():
+                skipped.append(
+                    {"path": source_file.archive_path, "reason": "vanished"}
+                )
+                continue
             hint = predict(source_file.source)
             searchable = bool(hint.searchable and search_index)
             raw_path = staging_dir / f"raw-{position:08d}.bin"
-            raw_size, digest, text_info = _spool_source(
-                source_file.source,
-                raw_path,
-                searchable=searchable,
-            )
+            try:
+                raw_size, digest, text_info = _spool_source(
+                    source_file.source,
+                    raw_path,
+                    searchable=searchable,
+                )
+            except FileNotFoundError:
+                # SQLite -shm/-wal siblings, rotating logs and editor swap files
+                # vanish mid-run; a backup must report that, not abort.
+                skipped.append(
+                    {"path": source_file.archive_path, "reason": "vanished"}
+                )
+                continue
             raw_total += raw_size
 
             dedup_of = None
@@ -545,6 +567,7 @@ def pack(
                     }
                 )
 
+        skipped_summary = _skipped_summary(skipped)
         archive_id = str(uuid.uuid4())
         semantic = unavailable_semantic_descriptor(
             reason="portable-reference-backend; native semantic index not built"

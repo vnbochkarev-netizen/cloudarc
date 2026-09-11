@@ -17,6 +17,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from unittest.mock import patch
+
+from core import packer
 from core.errors import SafetyError
 from core.format import read_manifest
 from core.packer import analyze, pack, search_archive, unpack
@@ -152,6 +155,53 @@ class SymlinkHandlingTests(unittest.TestCase):
 
             with self.assertRaises(SafetyError):
                 pack([link], root / "a.vibo")
+
+
+class VanishedFileTests(unittest.TestCase):
+    """Files that disappear mid-run must be reported, not abort the archive.
+
+    Found on a real tree: SQLite removes its ``-shm`` sibling while a pack was
+    running, and the whole 2.2 GB backup died with FileNotFoundError.
+    """
+
+    def test_file_that_vanishes_mid_run_is_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "tree"
+            source.mkdir()
+            (source / "keep.md").write_text("keep", encoding="utf-8")
+            (source / "gone.md").write_text("gone", encoding="utf-8")
+            archive = root / "a.vibo"
+            real_spool = packer._spool_source
+
+            def flaky(path, *args, **kwargs):
+                if Path(path).name == "gone.md":
+                    raise FileNotFoundError(str(path))
+                return real_spool(path, *args, **kwargs)
+
+            with patch("core.packer._spool_source", side_effect=flaky):
+                result = pack([source], archive)
+
+            self.assertEqual(result["entry_count"], 1)
+            self.assertEqual(result["skipped_by_reason"], {"vanished": 1})
+            self.assertEqual(result["skipped"][0]["path"], "tree/gone.md")
+
+    def test_missing_file_is_reported_in_analyze(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "tree"
+            source.mkdir()
+            (source / "keep.md").write_text("keep", encoding="utf-8")
+            (source / "gone.md").write_text("gone", encoding="utf-8")
+            original = packer._stream_estimate
+
+            def flaky(*args, **kwargs):
+                raise FileNotFoundError("gone")
+
+            with patch("core.packer._stream_estimate", side_effect=flaky):
+                plan = analyze([source])
+
+            self.assertEqual(plan["skipped_summary"]["by_reason"], {"vanished": 2})
 
 
 class NoIndexTests(unittest.TestCase):
