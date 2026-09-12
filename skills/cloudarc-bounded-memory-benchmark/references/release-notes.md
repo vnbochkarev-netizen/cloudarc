@@ -1,3 +1,30 @@
+# CloudArc Bounded-Memory Benchmark 1.4.2
+
+**Release date:** 2026-09-12
+
+## Highlights
+
+- Removed the hard CPython 3.11 gate in `core/semantic.py`; a native semantic
+  backend is now decided by a real import plus the published
+  `cloudarc.native-semantic-v1` capability, so it works on 3.12 (or any CPython
+  with a matching build).
+- Failed imports are classified: a probe now reports which build tags exist next
+  to the module and which one is required.
+- The archive index records `semantic.status: ready` with `model_id` and
+  `dimensions` when a native backend answers a descriptor probe; previously it
+  always said `unavailable`, even while semantic search worked.
+- New regression suite `tests/test_native_capability.py` (10 tests); product
+  suite 152 -> 162 tests.
+
+## Verification
+
+- `runtime --json` on Python 3.12 with a cp312 ViBo build:
+  `semantic_available: true`, `api_version: cloudarc.native-semantic-v1`.
+- `search --mode semantic`: `mode_used: semantic`, no fallback, expected document
+  ranked first.
+- Without a core build the executor degrades to lemmatised matching and reports
+  that engine honestly.
+
 # CloudArc Bounded-Memory Benchmark 1.4.1
 
 **Release date:** 2026-09-11
