@@ -216,6 +216,7 @@ A native module must publish `CLOUDARC_CAPABILITIES` or a
     "supported": true,
     "api_version": "cloudarc.native-semantic-v1",
     "search_function": "cloudarc_semantic_search",
+    "descriptor_function": "cloudarc_semantic_descriptor",
     "model_ids": ["provider-defined"]
   }
 }
@@ -225,6 +226,14 @@ The named function receives `(query, archive, limit)` or equivalent keyword
 arguments and returns a list of result objects. The adapter rejects modules
 that do not publish this exact versioned capability. Opaque native vector
 bytes are not re-encoded by CloudArc.
+
+The interpreter version is **not** part of the negotiation: the adapter probes a
+real import, so any CPython with a matching build is accepted, and a failed
+import reports which build tags exist and which one is required. When the module
+publishes `descriptor_function`, CloudArc calls it at pack time to record
+`model_id` and `dimensions` in the index descriptor; without it the index keeps
+`status: unavailable` while semantic search still runs through the search
+function.
 
 ### Search mode semantics
 
@@ -305,7 +314,7 @@ workload identity and exclusions are normative in
 ## 9. Compatibility boundary
 
 The portable reference backend is the compatibility baseline for CloudArc.
-Native ViBo use is opt-in and requires a Linux CPython 3.11 preflight plus the
+Native ViBo use is opt-in and requires an explicit capability handshake plus the
 capability contract above. Native output that cannot produce this
 manifest/index contract must be wrapped or rejected; it must not be silently
 treated as a CloudArc archive.

@@ -119,7 +119,7 @@ for unpack; the machine-readable evidence is in
 | Reference pack/unpack/list/info/search | Works on Python 3.11+ and Windows |
 | Versioned manifest/index v2 | Implemented; v1 reader retained |
 | Lexical remote sidecar search | Implemented for local provider |
-| Native semantic negotiation | Adapter implemented; requires Linux CPython 3.11 and explicit capability |
+| Native semantic negotiation | Adapter implemented; the module is probed by real import + explicit `cloudarc.native-semantic-v1` capability (any CPython with a matching build, no version gate) |
 | Optional zstd | Used when the package is installed |
 | Native `vibo_archive` from supplied skill | Preflight only; no license activation |
 | Yandex Disk | REST v1 adapter: list/meta/folder/upload/download/delete/find/range reads; token from env or file |

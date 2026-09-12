@@ -383,6 +383,8 @@ def _push(args, config: dict, config_path: Path) -> dict:
                     metadata=not getattr(args, "no_metadata", False),
                     allow_system=getattr(args, "allow_system", False),
                     accept_changing=getattr(args, "accept_changing", False),
+                    native_module_path=(config.get("native", {}) or {}).get("module_path") or None,
+                    native_module_name=(config.get("native", {}) or {}).get("module_name", "vibo_archive"),
                     stats_writer=_stats_writer(config, config_path),
                     stats_context={
                         "disk": args.disk or config["default_disk"],
@@ -778,6 +780,8 @@ def main(argv: list[str] | None = None) -> int:
                 metadata=not getattr(args, "no_metadata", False),
                 allow_system=getattr(args, "allow_system", False),
                 accept_changing=getattr(args, "accept_changing", False),
+                native_module_path=(config.get("native", {}) or {}).get("module_path") or None,
+                native_module_name=(config.get("native", {}) or {}).get("module_name", "vibo_archive"),
             )
             _warn_skipped(result)
             _warn_codec(result)

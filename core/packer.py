@@ -30,6 +30,7 @@ from .format import (
 from .index import (
     StreamingTextIndexer,
     build_index,
+    ready_semantic_descriptor,
     semantic_descriptor,
     search_index,
     unavailable_semantic_descriptor,
@@ -47,7 +48,8 @@ from .safety import (
     ensure_within,
     protected_name_reason,
 )
-from .semantic import get_native_semantic_backend, probe_native
+from .semantic import (get_native_semantic_backend, native_semantic_descriptor,
+                       probe_native)
 from .squeeze_hints import predict, zstd_available
 
 
@@ -784,6 +786,30 @@ def _commit_archive_bundle(
     return output_path, pairs[1][1], pairs[2][1]
 
 
+def _semantic_for_index(native_module_path: str | None,
+                        native_module_name: str) -> dict:
+    """Semantic descriptor for the index: "ready" only if the engine answers.
+
+    The index used to declare semantic search unavailable even when a native
+    executor was wired in and search worked, which was misleading.
+    """
+
+    meta = native_semantic_descriptor(native_module_path, module_name=native_module_name)
+    if isinstance(meta, dict) and meta.get("status") == "ready" and meta.get("model_id"):
+        dims = meta.get("dimensions")
+        if isinstance(dims, int) and not isinstance(dims, bool) and dims > 0:
+            return ready_semantic_descriptor(
+                model_id=str(meta["model_id"]),
+                dimensions=dims,
+                metric=str(meta.get("metric") or "cosine"),
+                index_ref=str(meta.get("index_ref") or "sidecar"),
+            )
+    reason = meta.get("reason") if isinstance(meta, dict) else None
+    return unavailable_semantic_descriptor(
+        reason=reason or "portable-reference-backend; native semantic index not built"
+    )
+
+
 def pack(
     inputs: Iterable[str | Path],
     output: str | Path,
@@ -799,6 +825,8 @@ def pack(
     metadata: bool = True,
     allow_system: bool = False,
     accept_changing: bool = False,
+    native_module_path: str | None = None,
+    native_module_name: str = "vibo_archive",
 ) -> dict:
     input_values = list(inputs)
     search_index = bool(index)
@@ -1073,9 +1101,7 @@ def pack(
 
         skipped_summary = _skipped_summary(skipped)
         archive_id = str(uuid.uuid4())
-        semantic = unavailable_semantic_descriptor(
-            reason="portable-reference-backend; native semantic index not built"
-        )
+        semantic = _semantic_for_index(native_module_path, native_module_name)
         index = build_index(
             index_documents,
             archive_id=archive_id,

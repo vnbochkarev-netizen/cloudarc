@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-FALLBACK_VERSION = "1.4.1"
+FALLBACK_VERSION = "1.4.2"
 PYPROJECT_PATH = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
 

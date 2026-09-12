@@ -27,6 +27,59 @@ from .index import (
 DEFAULT_NATIVE_MODULE = "vibo_archive"
 
 
+def interpreter_tag() -> str:
+    """Build tag of the running interpreter: cpython-311, cpython-312, ..."""
+
+    return f"cpython-{sys.version_info.major}{sys.version_info.minor}"
+
+
+def _build_mismatch_hint(exc: Exception) -> str:
+    """Tell "extension built for another CPython" apart from other import errors.
+
+    Signals: the extension does not export ``PyInit_<name>`` for this
+    interpreter, a wrong ELF class, or an incompatible platform.
+    """
+
+    text = f"{exc.__class__.__name__}: {exc}"
+    markers = (
+        "does not define module export function",
+        "wrong ELF class",
+        "invalid ELF header",
+        "incompatible architecture",
+        "undefined symbol",
+        "cannot open shared object",
+        "file too short",
+    )
+    if any(m in text for m in markers):
+        return (f"native module was built for a different CPython; a "
+                f"{interpreter_tag()} build is required (import said: {text[:160]})")
+    return ""
+
+
+def _available_build_tags(module_path: str | None, module_name: str) -> list[str]:
+    """Which builds of this module sit next to it (cpython-311, cpython-312, ...)."""
+
+    roots = [Path(module_path).expanduser()] if module_path else []
+    roots += [Path(p) for p in sys.path if p]
+    tags: list[str] = []
+    for root in roots:
+        try:
+            if not root.is_dir():
+                continue
+            for entry in root.iterdir():
+                name = entry.name
+                if not name.startswith(module_name + "."):
+                    continue
+                for suffix in (".so", ".pyd", ".dylib"):
+                    if name.endswith(suffix):
+                        tag = name[len(module_name) + 1:-len(suffix)]
+                        if tag:
+                            tags.append(tag)
+        except OSError:
+            continue
+    return sorted(set(tags))
+
+
 def _import_module(
     module_path: str | None = None,
     module_name: str = DEFAULT_NATIVE_MODULE,
@@ -34,12 +87,28 @@ def _import_module(
     """Import a candidate module without permanently mutating ``sys.path``."""
 
     original_path = list(sys.path)
+    cached = sys.modules.get(module_name)
     try:
         if module_path:
             sys.path.insert(0, str(Path(module_path).expanduser()))
+            if cached is not None:
+                # A path was given explicitly: the module must come from there.
+                # Otherwise the sys.modules cache reports "available" for an
+                # unrelated module that was imported earlier.
+                sys.modules.pop(module_name, None)
         importlib.invalidate_caches()
         return importlib.import_module(module_name), ""
     except Exception as exc:
+        if cached is not None and module_name not in sys.modules:
+            sys.modules[module_name] = cached
+        hint = _build_mismatch_hint(exc)
+        if hint:
+            return None, f"{module_name}: {hint}"
+        tags = _available_build_tags(module_path, module_name)
+        if tags:
+            return None, (f"{module_name} is not built for {interpreter_tag()} "
+                          f"(builds found in {module_path or 'sys.path'}: "
+                          f"{', '.join(tags)}); a {interpreter_tag()} build is required")
         return None, f"{module_name} import failed: {exc}"
     finally:
         sys.path[:] = original_path
@@ -94,6 +163,7 @@ def _semantic_capability(
         "index_schema_versions": versions,
         "search_function": function_name,
         "model_ids": semantic.get("model_ids", []),
+        "descriptor_function": semantic.get("descriptor_function", ""),
     }
     if not supported:
         return capability, "native module explicitly disables semantic search"
@@ -124,15 +194,11 @@ def probe_native(
         "semantic_available": False,
         "semantic_reason": "",
     }
-    if sys.platform != "linux":
-        result["reason"] = "native ViBo package is a Linux extension"
-        result["semantic_reason"] = result["reason"]
-        return result
-    if sys.version_info[:2] != (3, 11):
-        result["reason"] = "native ViBo package requires CPython 3.11"
-        result["semantic_reason"] = result["reason"]
-        return result
-
+    # This used to be a hard refusal ("CPython 3.11 required") - a proxy for
+    # "our .so is tagged cp311". It made the native module unusable on 3.12 (or
+    # any other version) even when a matching build existed. The check is now
+    # real: try the import and inspect the published capability.
+    result["interpreter"] = interpreter_tag()
     module, reason = _import_module(module_path, module_name)
     if module is None:
         result["reason"] = reason
@@ -239,8 +305,6 @@ def get_native_semantic_backend(
 ) -> NativeSemanticBackend | None:
     """Return a backend only when the full capability contract is present."""
 
-    if sys.platform != "linux" or sys.version_info[:2] != (3, 11):
-        return None
     module, _ = _import_module(module_path, module_name)
     if module is None:
         return None
@@ -249,6 +313,26 @@ def get_native_semantic_backend(
     if reason:
         return None
     return NativeSemanticBackend(module=module, capability=capability)
+
+
+def native_semantic_descriptor(module_path: str | None = None, *,
+                               module_name: str = DEFAULT_NATIVE_MODULE) -> dict | None:
+    """Semantic engine metadata published by the native module, if it offers any."""
+
+    backend = get_native_semantic_backend(module_path, module_name=module_name)
+    if backend is None:
+        return None
+    name = backend.capability.get("descriptor_function") or ""
+    if not name:
+        return None
+    fn = getattr(backend.module, name, None)
+    if not callable(fn):
+        return None
+    try:
+        value = fn()
+    except Exception:  # noqa: BLE001
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def require_native(module_path: str | None = None) -> None:

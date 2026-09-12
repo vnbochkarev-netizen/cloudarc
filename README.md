@@ -13,7 +13,9 @@ protocol tests work on Windows without the Linux ViBo native extension.
 ## Runtime
 
 - Python 3.11 or newer for the reference backend.
-- The supplied ViBo native extension is Linux CPython 3.11 only. Use
+- The native ViBo extension must be built for the interpreter that runs CloudArc
+  (`cpython-311`, `cpython-312`, …); CloudArc probes by import and reports which
+  builds are present when the current one is missing. Use
   `python cloudarc.py runtime` to see whether it is available.
 
 ## Quick start
