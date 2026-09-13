@@ -1,14 +1,42 @@
-# Vibo CloudArc MVP
+# CloudArc
+
+**Pack a 10 GiB folder into a single `.vibo` archive at a flat ~28 MiB peak RSS — then read its
+metadata remotely without ever fetching the payload.**
+
+Apache-2.0 · no cloud credentials needed to try · Python 3.11+
 
 ![CloudArc SLO](docs/cloudarc-slo-badge.svg)
-
 ![Peak RSS vs payload size](docs/cloudarc-rss-vs-size.png)
 
+| payload | pack peak RSS | unpack peak RSS |
+|---|---|---|
+| 1 GiB | 27.7 MiB | 26.9 MiB |
+| 5 GiB | 27.8 MiB | 26.8 MiB |
+| 10 GiB | **27.8 MiB** | **26.9 MiB** |
 
-CloudArc is a safety-first CLI around a CloudArc-specific `.vibo` container.
-The repository includes a portable reference backend so local packing,
-versioned manifest/index generation, round-trip restore, and remote-search
-protocol tests work on Windows without the Linux ViBo native extension.
+Flat: ~25 MiB of that is CPython itself, the pipeline adds ~2 MiB and does **not** grow with
+payload size (the normative SLO ceiling is 256 MiB — an order of magnitude of headroom).
+
+### What it does that `tar` and `zip` do not
+
+1. **Metadata reads never touch the data section.** `info`, `list` and `search` work through HTTP
+   range requests; CI rejects any response that claims `data_section_read` — the payload is never
+   fetched to answer a metadata question.
+2. **High-cardinality multi-file packages.** A 5,000-file profile with a versioned manifest and an
+   index document per entry, plus content dedup by SHA-256.
+3. **Safety defaults.** Everything is a preview unless `--apply`/`--yes`; overwriting creates a
+   sibling backup; unpack verifies size and SHA-256 per entry; path escapes and protected
+   directories are rejected.
+
+### Try it in three commands
+
+```bash
+git clone https://github.com/vnbochkarev-netizen/cloudarc && cd cloudarc
+python cloudarc.py pack ./documents -o ./out/documents.vibo --apply
+python cloudarc.py search ./out/documents.vibo "quarterly report" --mode semantic
+```
+
+---
 
 ## Runtime
 
