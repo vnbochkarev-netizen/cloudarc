@@ -1,7 +1,8 @@
 # CloudArc
 
-**Pack a 10 GiB folder into a single `.vibo` archive at a flat ~28 MiB peak RSS — then read its
-metadata remotely without ever fetching the payload.**
+**Pack a 10 GiB folder into a single `.vibo` archive without the memory growing — 25.9 MiB peak RSS
+for pack, 31.2 MiB for unpack, flat from 1 GiB to 10 GiB — then read its metadata remotely without
+ever fetching the payload.**
 
 Apache-2.0 · no cloud credentials needed to try · Python 3.11+
 
@@ -10,12 +11,15 @@ Apache-2.0 · no cloud credentials needed to try · Python 3.11+
 
 | payload | pack peak RSS | unpack peak RSS |
 |---|---|---|
-| 1 GiB | 27.7 MiB | 26.9 MiB |
-| 5 GiB | 27.8 MiB | 26.8 MiB |
-| 10 GiB | **27.8 MiB** | **26.9 MiB** |
+| 1 GiB | 26.0 MiB | 29.7 MiB |
+| 5 GiB | 25.8 MiB | 31.0 MiB |
+| 10 GiB | **25.9 MiB** | **31.2 MiB** |
 
-Flat: ~25 MiB of that is CPython itself, the pipeline adds ~2 MiB and does **not** grow with
-payload size (the normative SLO ceiling is 256 MiB — an order of magnitude of headroom).
+Flat: ~25 MiB of that is the interpreter baseline; the pipeline adds ~3 MiB for pack and ~7 MiB for
+unpack and does **not** grow with payload size. Normative limits: peak RSS ≤ 256 MiB, and peak-RSS
+spread across 1/5/10 GiB ≤ 64 MiB — measured spread 0.2 MiB (pack) and 1.5 MiB (unpack). The run
+artifacts, environment and the honest limitations are in
+[`docs/LARGE_PACKAGE_BENCHMARK.md`](docs/LARGE_PACKAGE_BENCHMARK.md).
 
 ### What it does that `tar` and `zip` do not
 
