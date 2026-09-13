@@ -1,0 +1,7 @@
+
+[semantic]
+fastembed>=0.5
+usearch>=2.15
+
+[zstd]
+zstandard>=0.22

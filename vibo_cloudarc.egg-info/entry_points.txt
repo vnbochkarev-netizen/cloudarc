@@ -1,0 +1,3 @@
+[console_scripts]
+cloudarc = cloudarc:main
+cloudarc-benchmark = benchmarks.large_package:main

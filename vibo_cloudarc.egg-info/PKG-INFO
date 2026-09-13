@@ -1,7 +1,32 @@
+Metadata-Version: 2.4
+Name: vibo-cloudarc
+Version: 1.4.2
+Summary: Pack a 10 GiB folder into one .vibo archive at a flat ~26 MiB peak RSS, and read its index over HTTP without fetching the payload
+Project-URL: Homepage, https://github.com/vnbochkarev-netizen/cloudarc
+Project-URL: Repository, https://github.com/vnbochkarev-netizen/cloudarc
+Project-URL: Issues, https://github.com/vnbochkarev-netizen/cloudarc/issues
+Project-URL: Changelog, https://github.com/vnbochkarev-netizen/cloudarc/releases
+Keywords: archive,bounded-memory,streaming,compression,cli,knowledge-base,http-range,vibo
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: System :: Archiving
+Classifier: Topic :: System :: Archiving :: Compression
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Provides-Extra: zstd
+Requires-Dist: zstandard>=0.22; extra == "zstd"
+Provides-Extra: semantic
+Requires-Dist: fastembed>=0.5; extra == "semantic"
+Requires-Dist: usearch>=2.15; extra == "semantic"
+Dynamic: license-file
+
 # CloudArc
-
-![CloudArc](docs/social-preview.png)
-
 
 **Pack a 10 GiB folder into a single `.vibo` archive without the memory growing — 25.9 MiB peak RSS
 for pack, 31.2 MiB for unpack, flat from 1 GiB to 10 GiB — then read its metadata remotely without
